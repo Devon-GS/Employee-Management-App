@@ -48,7 +48,7 @@ def seed_admin_user(db: Session) -> None:
 
 DEFAULT_STARTUP_CHECKLIST = {
     "Contract": {"done": False, "na": False, "date": None},
-    "Contract Status": {"done": False, "na": False, "date": None},
+    "Contract Status": {"done": False, "na": False, "date": None, "status": "", "info": "", "on_system": False},
     "Permit Status": {"done": False, "na": False, "date": None},
     "Passport / ID Copy": {"done": False, "na": False, "date": None},
     "Permit Copy": {"done": False, "na": False, "date": None},
@@ -63,6 +63,23 @@ DEFAULT_STARTUP_CHECKLIST = {
     "Phone No. onto Contacts List": {"done": False, "na": False, "date": None},
     "Staff Instructions / Training Pack": {"done": False, "na": False, "date": None},
 }
+
+
+def build_startup_defaults() -> dict:
+    return copy.deepcopy(DEFAULT_STARTUP_CHECKLIST)
+
+
+def normalize_startup_data(data: dict | None) -> dict:
+    normalized = build_startup_defaults()
+    if not data:
+        return normalized
+
+    for key, value in data.items():
+        if key in normalized and isinstance(value, dict):
+            normalized[key] = {**normalized[key], **value}
+        else:
+            normalized[key] = value
+    return normalized
 
 
 @app.on_event("startup")
@@ -150,7 +167,7 @@ def create_employee(
     employee = Employee(
         name=payload.name.strip(),
         passport_id=passport_id,
-        startup_data=copy.deepcopy(DEFAULT_STARTUP_CHECKLIST),
+        startup_data=build_startup_defaults(),
     )
     db.add(employee)
     try:
@@ -216,7 +233,7 @@ def get_employee_startup(
     return {
         "employee_id": employee.id,
         "employee_name": employee.name,
-        "startup_data": employee.startup_data or copy.deepcopy(DEFAULT_STARTUP_CHECKLIST),
+        "startup_data": normalize_startup_data(employee.startup_data),
     }
 
 
@@ -231,7 +248,7 @@ def update_employee_startup(
     if employee is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
 
-    employee.startup_data = payload.checklist
+    employee.startup_data = normalize_startup_data(payload.checklist)
     db.add(employee)
     db.commit()
     return {"message": "Startup checklist updated successfully"}

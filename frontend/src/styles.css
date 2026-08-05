@@ -435,6 +435,10 @@ input {
   width: min(980px, 100%);
 }
 
+.contract-status-modal {
+  width: min(680px, 100%);
+}
+
 .contract-upload-area {
   display: flex;
   align-items: end;
@@ -567,6 +571,29 @@ input {
   background: rgba(255, 255, 255, 0.96);
   color: var(--text);
   outline: none;
+}
+
+.modal-form select {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(19, 32, 51, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  outline: none;
+}
+
+.checkbox-label {
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
 }
 
 @media (max-width: 900px) {
