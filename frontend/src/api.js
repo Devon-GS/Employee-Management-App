@@ -91,3 +91,128 @@ export async function createEmployee(token, name, passportId) {
 
   return data;
 }
+
+export async function fetchEmployeeStartup(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/startup`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load employee startup data");
+  }
+
+  return data;
+}
+
+export async function saveEmployeeStartup(token, employeeId, checklist) {
+  const response = await fetch(`/api/employees/${employeeId}/startup`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ checklist }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to save employee startup data");
+  }
+
+  return data;
+}
+
+export async function fetchContractFiles(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/contract-files`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load contract files");
+  }
+
+  return data;
+}
+
+export async function uploadContractFiles(token, employeeId, files) {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  const response = await fetch(`/api/employees/${employeeId}/contract-files`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to upload contract files");
+  }
+
+  return data;
+}
+
+export async function deleteContractFile(token, fileId) {
+  const response = await fetch(`/api/contract-files/${fileId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to delete contract file");
+  }
+
+  return data;
+}
+
+async function fetchFileBlob(token, url) {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || "Unable to load file");
+  }
+
+  return response.blob();
+}
+
+export async function viewContractFile(token, fileId) {
+  const blob = await fetchFileBlob(token, `/api/contract-files/${fileId}/view`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+export async function downloadContractFile(token, fileId, filename) {
+  const blob = await fetchFileBlob(token, `/api/contract-files/${fileId}/download`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}

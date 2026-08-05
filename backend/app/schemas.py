@@ -34,3 +34,23 @@ class EmployeeResponse(BaseModel):
     id: int
     name: str
     passport_id: str
+    startup_data: dict = Field(default_factory=dict)
+
+
+class EmployeeUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    passport_id: str = Field(min_length=1, max_length=120)
+
+
+class StartupChecklistRequest(BaseModel):
+    checklist: dict
+
+
+class ContractFileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_id: int
+    original_filename: str
+    content_type: str
+    size_bytes: int

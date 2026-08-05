@@ -353,9 +353,156 @@ input {
   flex-wrap: wrap;
 }
 
+.startup-panel {
+  grid-template-columns: 1fr;
+}
+
+.startup-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1020px;
+}
+
+.startup-table th,
+.startup-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(19, 32, 51, 0.1);
+  vertical-align: top;
+}
+
+.startup-table th {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.startup-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.startup-table tr.startup-row-done {
+  background: rgba(40, 167, 69, 0.12);
+}
+
+.startup-table tr.startup-row-na {
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
+.startup-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.date-input {
+  width: 100%;
+  max-width: 180px;
+}
+
+.muted-cell {
+  color: var(--muted);
+}
+
+.startup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.autosave-status {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .table-state {
   padding: 18px 0;
   color: var(--muted);
+}
+
+.contract-modal {
+  width: min(980px, 100%);
+}
+
+.contract-upload-area {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.file-picker {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 360px;
+  color: var(--muted);
+}
+
+.file-picker input[type="file"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed rgba(19, 32, 51, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.contract-file-list {
+  display: grid;
+  gap: 12px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.contract-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(19, 32, 51, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.contract-file-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.contract-file-meta span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.contract-file-row .table-actions {
+  justify-self: end;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 700px) {
+  .contract-file-row {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-file-row .table-actions {
+    justify-self: start;
+    flex-wrap: wrap;
+  }
 }
 
 .modal-backdrop {

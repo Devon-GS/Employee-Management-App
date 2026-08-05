@@ -16,6 +16,8 @@ services:
   backend:
     build:
       context: ./backend
+    volumes:
+      - uploads_data:/app/uploads
     environment:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/employee_app
       JWT_SECRET_KEY: development-secret-key
@@ -36,3 +38,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:
