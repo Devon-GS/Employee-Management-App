@@ -2,41 +2,57 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   deleteContractFile,
+  deleteEmployeeDocument,
   downloadContractFile,
+  downloadEmployeeDocument,
   fetchContractFiles,
+  fetchEmployeeDocuments,
   fetchEmployeeStartup,
   saveEmployeeStartup,
   uploadContractFiles,
+  uploadEmployeeDocuments,
   viewContractFile,
+  viewEmployeeDocument,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import Navbar from "../components/Navbar";
 
-const STARTUP_ITEMS = [
-  { label: "Contract", requiresDate: false, isContract: true },
-  { label: "Contract Status", requiresDate: true, isContractStatus: true },
-  { label: "Permit Status", requiresDate: true },
-  { label: "Passport / ID Copy", requiresDate: false },
-  { label: "Permit Copy", requiresDate: false },
-  { label: "Job Description", requiresDate: false },
-  { label: "Name for file & Name Badge", requiresDate: false },
-  { label: "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.", requiresDate: false },
-  { label: "Start", requiresDate: true },
-  { label: "UIF", requiresDate: true },
-  { label: "MIBCO reg", requiresDate: true },
-  { label: "Open Weekly Deduction Sheet", requiresDate: false },
-  { label: "Disciplinary Spreadsheet & Permit Spreadsheet", requiresDate: false },
-  { label: "Phone No. onto Contacts List", requiresDate: false },
-  { label: "Staff Instructions / Training Pack", requiresDate: false },
+const DOCUMENT_ROWS = [
+  { label: "Contract", documentType: "contract", isStatus: false },
+  { label: "Contract Status", isStatus: true },
+  { label: "Permit Status", isStatus: false },
+  { label: "Passport / ID Copy", documentType: "passport_id_copy", isStatus: false },
+  { label: "Permit Copy", documentType: "permit_copy", isStatus: false },
+  { label: "Name for file & Name Badge", isStatus: false },
+  { label: "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.", isStatus: false },
+  { label: "Start", isStatus: false },
+  { label: "UIF", isStatus: false },
+  { label: "MIBCO reg", isStatus: false },
+  { label: "Open Weekly Deduction Sheet", isStatus: false },
+  { label: "Disciplinary Spreadsheet & Permit Spreadsheet", isStatus: false },
+  { label: "Phone No. onto Contacts List", isStatus: false },
+  { label: "Staff Instructions / Training Pack / Job Description", isStatus: false },
 ];
 
-const CONTRACT_FILE_TYPES = ".pdf,.doc,.docx,.jpg,.jpeg";
 const CONTRACT_STATUS_OPTIONS = ["Seasonal/Temporary", "Permanent"];
+const ALLOWED_FILE_TYPES = ".pdf,.doc,.docx,.jpg,.jpeg";
+const DOCUMENT_LABELS = {
+  contract: "Contract",
+  passport_id_copy: "Passport / ID Copy",
+  permit_copy: "Permit Copy",
+};
 
 function buildDefaultChecklist() {
-  return STARTUP_ITEMS.reduce((accumulator, item) => {
-    accumulator[item.label] = { done: false, na: false, date: "" };
-    if (item.isContractStatus) {
+  return DOCUMENT_ROWS.reduce((accumulator, item) => {
+    accumulator[item.label] = {
+      done: false,
+      na: false,
+      date: "",
+      status: "",
+      info: "",
+      on_system: false,
+    };
+    if (item.label === "Contract Status") {
       accumulator[item.label] = {
         done: false,
         na: false,
@@ -65,16 +81,22 @@ function formatBytes(bytes) {
 }
 
 function getContractStatusRow(checklist) {
-  return (
-    checklist["Contract Status"] || {
-      done: false,
-      na: false,
-      date: "",
-      status: "",
-      info: "",
-      on_system: false,
-    }
-  );
+  return checklist["Contract Status"] || {
+    done: false,
+    na: false,
+    date: "",
+    status: "",
+    info: "",
+    on_system: false,
+  };
+}
+
+function emptyDocumentGroups() {
+  return {
+    contract: [],
+    passport_id_copy: [],
+    permit_copy: [],
+  };
 }
 
 export default function EmployeeStartupPage() {
@@ -90,14 +112,15 @@ export default function EmployeeStartupPage() {
   const [isDirty, setIsDirty] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [contractFiles, setContractFiles] = useState([]);
-  const [contractModalOpen, setContractModalOpen] = useState(false);
-  const [contractStatusModalOpen, setContractStatusModalOpen] = useState(false);
-  const [contractLoading, setContractLoading] = useState(false);
-  const [contractUploading, setContractUploading] = useState(false);
-  const [contractError, setContractError] = useState("");
-  const [contractMessage, setContractMessage] = useState("");
+  const [documentGroups, setDocumentGroups] = useState(emptyDocumentGroups);
+  const [activeDocumentType, setActiveDocumentType] = useState(null);
+  const [activeDocumentTitle, setActiveDocumentTitle] = useState("");
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  const [documentMessage, setDocumentMessage] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [contractStatusModalOpen, setContractStatusModalOpen] = useState(false);
   const [contractStatusDraft, setContractStatusDraft] = useState({
     status: "",
     date: "",
@@ -106,17 +129,33 @@ export default function EmployeeStartupPage() {
   const [contractStatusSaving, setContractStatusSaving] = useState(false);
   const [contractStatusError, setContractStatusError] = useState("");
 
-  async function loadContractFiles() {
-    setContractLoading(true);
-    setContractError("");
+  async function loadDocumentsForType(documentType) {
+    if (documentType === "contract") {
+      return fetchContractFiles(token, employeeId);
+    }
+    return fetchEmployeeDocuments(token, employeeId, documentType);
+  }
+
+  async function refreshDocumentGroups() {
+    setDocumentLoading(true);
+    setDocumentError("");
 
     try {
-      const files = await fetchContractFiles(token, employeeId);
-      setContractFiles(files);
+      const [contract, passportIdCopy, permitCopy] = await Promise.all([
+        loadDocumentsForType("contract"),
+        loadDocumentsForType("passport_id_copy"),
+        loadDocumentsForType("permit_copy"),
+      ]);
+
+      setDocumentGroups({
+        contract,
+        passport_id_copy: passportIdCopy,
+        permit_copy: permitCopy,
+      });
     } catch (err) {
-      setContractError(err.message || "Unable to load contract files");
+      setDocumentError(err.message || "Unable to load uploaded files");
     } finally {
-      setContractLoading(false);
+      setDocumentLoading(false);
     }
   }
 
@@ -131,7 +170,7 @@ export default function EmployeeStartupPage() {
         }
 
         const loadedChecklist = buildDefaultChecklist();
-        for (const item of STARTUP_ITEMS) {
+        for (const item of DOCUMENT_ROWS) {
           const itemState = data.startup_data?.[item.label] || {};
           loadedChecklist[item.label] = {
             done: Boolean(itemState.done),
@@ -155,13 +194,21 @@ export default function EmployeeStartupPage() {
         setIsDirty(false);
 
         try {
-          const files = await fetchContractFiles(token, employeeId);
+          const [contract, passportIdCopy, permitCopy] = await Promise.all([
+            loadDocumentsForType("contract"),
+            loadDocumentsForType("passport_id_copy"),
+            loadDocumentsForType("permit_copy"),
+          ]);
           if (mounted) {
-            setContractFiles(files);
+            setDocumentGroups({
+              contract,
+              passport_id_copy: passportIdCopy,
+              permit_copy: permitCopy,
+            });
           }
         } catch {
           if (mounted) {
-            setContractFiles([]);
+            setDocumentGroups(emptyDocumentGroups());
           }
         }
       } catch (err) {
@@ -181,15 +228,6 @@ export default function EmployeeStartupPage() {
       mounted = false;
     };
   }, [token, employeeId]);
-
-  useEffect(() => {
-    if (!contractModalOpen) {
-      return undefined;
-    }
-
-    loadContractFiles();
-    return undefined;
-  }, [contractModalOpen, employeeId, token]);
 
   useEffect(() => {
     if (!autoSaveReady || loading || !isDirty) {
@@ -226,18 +264,20 @@ export default function EmployeeStartupPage() {
     }));
   }
 
-  function openContractModal() {
-    setContractModalOpen(true);
-    setContractError("");
-    setContractMessage("");
+  function openDocumentModal(documentType) {
+    setActiveDocumentType(documentType);
+    setActiveDocumentTitle(DOCUMENT_LABELS[documentType]);
+    setDocumentError("");
+    setDocumentMessage("");
     setSelectedFiles([]);
   }
 
-  function closeContractModal() {
-    if (!contractUploading) {
-      setContractModalOpen(false);
-      setContractError("");
-      setContractMessage("");
+  function closeDocumentModal() {
+    if (!documentUploading) {
+      setActiveDocumentType(null);
+      setActiveDocumentTitle("");
+      setDocumentError("");
+      setDocumentMessage("");
       setSelectedFiles([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -279,60 +319,77 @@ export default function EmployeeStartupPage() {
     }
   }
 
-  async function handleContractUpload() {
-    if (!selectedFiles.length) {
-      setContractError("Please choose at least one file.");
+  async function handleDocumentUpload() {
+    if (!selectedFiles.length || !activeDocumentType) {
+      setDocumentError("Please choose at least one file.");
       return;
     }
 
-    setContractUploading(true);
-    setContractError("");
-    setContractMessage("");
+    setDocumentUploading(true);
+    setDocumentError("");
+    setDocumentMessage("");
 
     try {
-      await uploadContractFiles(token, employeeId, selectedFiles);
-      setContractMessage("Files uploaded successfully.");
-      updateRow("Contract", { done: true, na: false });
+      if (activeDocumentType === "contract") {
+        await uploadContractFiles(token, employeeId, selectedFiles);
+      } else {
+        await uploadEmployeeDocuments(token, employeeId, activeDocumentType, selectedFiles);
+      }
+
+      setDocumentMessage("Files uploaded successfully.");
+      updateRow(DOCUMENT_LABELS[activeDocumentType], { done: true, na: false });
       setSelectedFiles([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
-      await loadContractFiles();
+      await refreshDocumentGroups();
     } catch (err) {
-      setContractError(err.message || "Unable to upload contract files");
+      setDocumentError(err.message || "Unable to upload files");
     } finally {
-      setContractUploading(false);
+      setDocumentUploading(false);
     }
   }
 
-  async function handleView(fileId) {
+  async function handleViewDocument(documentId) {
     try {
-      await viewContractFile(token, fileId);
+      if (activeDocumentType === "contract") {
+        await viewContractFile(token, documentId);
+      } else {
+        await viewEmployeeDocument(token, documentId);
+      }
     } catch (err) {
-      setContractError(err.message || "Unable to view file");
+      setDocumentError(err.message || "Unable to view file");
     }
   }
 
-  async function handleDownload(file) {
+  async function handleDownloadDocument(document) {
     try {
-      await downloadContractFile(token, file.id, file.original_filename);
+      if (activeDocumentType === "contract") {
+        await downloadContractFile(token, document.id, document.original_filename);
+      } else {
+        await downloadEmployeeDocument(token, document.id, document.original_filename);
+      }
     } catch (err) {
-      setContractError(err.message || "Unable to download file");
+      setDocumentError(err.message || "Unable to download file");
     }
   }
 
-  async function handleDelete(fileId) {
-    const confirmed = window.confirm("Delete this uploaded contract file?");
+  async function handleDeleteDocument(documentId) {
+    const confirmed = window.confirm("Delete this uploaded file?");
     if (!confirmed) {
       return;
     }
 
     try {
-      await deleteContractFile(token, fileId);
-      await loadContractFiles();
-      setContractMessage("File deleted successfully.");
+      if (activeDocumentType === "contract") {
+        await deleteContractFile(token, documentId);
+      } else {
+        await deleteEmployeeDocument(token, documentId);
+      }
+      await refreshDocumentGroups();
+      setDocumentMessage("File deleted successfully.");
     } catch (err) {
-      setContractError(err.message || "Unable to delete file");
+      setDocumentError(err.message || "Unable to delete file");
     }
   }
 
@@ -392,9 +449,11 @@ export default function EmployeeStartupPage() {
     }
   }
 
-  const contractUploadLabel =
-    contractFiles.length > 0 ? `${contractFiles.length} Uploaded` : "0 Uploaded";
   const contractStatusRow = getContractStatusRow(checklist);
+
+  function getDocumentCount(documentType) {
+    return documentGroups[documentType]?.length || 0;
+  }
 
   return (
     <main className="dashboard-shell">
@@ -421,23 +480,23 @@ export default function EmployeeStartupPage() {
               </tr>
             </thead>
             <tbody>
-              {STARTUP_ITEMS.map((item) => {
+              {DOCUMENT_ROWS.map((item) => {
                 const row = checklist[item.label] || { done: false, na: false, date: "" };
                 const rowClass = row.done ? "startup-row-done" : row.na ? "startup-row-na" : "";
-                const infoValue = item.isContract
-                  ? contractUploadLabel
-                  : item.isContractStatus
+                const infoValue = item.documentType
+                  ? `${getDocumentCount(item.documentType)} Uploaded`
+                  : item.label === "Contract Status"
                     ? contractStatusRow.info || "-"
                     : "-";
 
                 return (
                   <tr key={item.label} className={rowClass}>
                     <td>
-                      {item.isContract ? (
-                        <button type="button" className="startup-link" onClick={openContractModal}>
+                      {item.documentType ? (
+                        <button type="button" className="startup-link" onClick={() => openDocumentModal(item.documentType)}>
                           {item.label}
                         </button>
-                      ) : item.isContractStatus ? (
+                      ) : item.label === "Contract Status" ? (
                         <button type="button" className="startup-link" onClick={openContractStatusModal}>
                           {item.label}
                         </button>
@@ -470,17 +529,25 @@ export default function EmployeeStartupPage() {
                       />
                     </td>
                     <td>
-                      {item.requiresDate ? (
+                      {item.label === "Contract Status" ? (
                         <input
                           type="date"
-                          value={item.isContractStatus ? contractStatusRow.date || "" : row.date}
-                          onChange={(event) =>
-                            item.isContractStatus
-                              ? handleContractStatusDateChange(event.target.value)
-                              : item.label === "Permit Status"
-                                ? handlePermitStatusDateChange(event.target.value)
-                                : updateRow(item.label, { date: event.target.value })
-                          }
+                          value={contractStatusRow.date || ""}
+                          onChange={(event) => handleContractStatusDateChange(event.target.value)}
+                          className="date-input"
+                        />
+                      ) : item.label === "Permit Status" ? (
+                        <input
+                          type="date"
+                          value={row.date}
+                          onChange={(event) => handlePermitStatusDateChange(event.target.value)}
+                          className="date-input"
+                        />
+                      ) : item.label === "UIF" || item.label === "MIBCO reg" || item.label === "Start" ? (
+                        <input
+                          type="date"
+                          value={row.date}
+                          onChange={(event) => updateRow(item.label, { date: event.target.value })}
                           className="date-input"
                         />
                       ) : (
@@ -503,23 +570,23 @@ export default function EmployeeStartupPage() {
         </div>
       </section>
 
-      {contractModalOpen ? (
-        <div className="modal-backdrop" onClick={closeContractModal}>
+      {activeDocumentType ? (
+        <div className="modal-backdrop" onClick={closeDocumentModal}>
           <div className="modal-card contract-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h2>Contract Files</h2>
-              <button className="icon-button" type="button" onClick={closeContractModal}>
+              <h2>{activeDocumentTitle}</h2>
+              <button className="icon-button" type="button" onClick={closeDocumentModal}>
                 ×
               </button>
             </div>
 
             <div className="contract-upload-area">
               <label className="file-picker">
-                <span>Choose contract file(s)</span>
+                <span>Choose file(s)</span>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={CONTRACT_FILE_TYPES}
+                  accept={ALLOWED_FILE_TYPES}
                   multiple
                   onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
                 />
@@ -528,36 +595,36 @@ export default function EmployeeStartupPage() {
               <button
                 className="primary-button"
                 type="button"
-                onClick={handleContractUpload}
-                disabled={contractUploading}
+                onClick={handleDocumentUpload}
+                disabled={documentUploading}
               >
-                {contractUploading ? "Uploading..." : "Upload"}
+                {documentUploading ? "Uploading..." : "Upload"}
               </button>
             </div>
 
-            {contractError ? <div className="error-banner">{contractError}</div> : null}
-            {contractMessage ? <div className="success-banner">{contractMessage}</div> : null}
+            {documentError ? <div className="error-banner">{documentError}</div> : null}
+            {documentMessage ? <div className="success-banner">{documentMessage}</div> : null}
 
             <div className="contract-file-list">
-              {contractLoading ? (
-                <div className="table-state">Loading contract files...</div>
-              ) : contractFiles.length === 0 ? (
-                <div className="table-state">No contract files uploaded yet.</div>
+              {documentLoading ? (
+                <div className="table-state">Loading uploaded files...</div>
+              ) : documentGroups[activeDocumentType]?.length === 0 ? (
+                <div className="table-state">No uploaded files yet.</div>
               ) : (
-                contractFiles.map((file) => (
-                  <div key={file.id} className="contract-file-row">
+                documentGroups[activeDocumentType]?.map((document) => (
+                  <div key={document.id} className="contract-file-row">
                     <div className="contract-file-meta">
-                      <strong>{file.original_filename}</strong>
-                      <span>{formatBytes(file.size_bytes)}</span>
+                      <strong>{document.original_filename}</strong>
+                      <span>{formatBytes(document.size_bytes)}</span>
                     </div>
                     <div className="table-actions">
-                      <button className="secondary-button" type="button" onClick={() => handleView(file.id)}>
+                      <button className="secondary-button" type="button" onClick={() => handleViewDocument(document.id)}>
                         View
                       </button>
-                      <button className="secondary-button" type="button" onClick={() => handleDownload(file)}>
+                      <button className="secondary-button" type="button" onClick={() => handleDownloadDocument(document)}>
                         Download
                       </button>
-                      <button className="secondary-button" type="button" onClick={() => handleDelete(file.id)}>
+                      <button className="secondary-button" type="button" onClick={() => handleDeleteDocument(document.id)}>
                         Delete
                       </button>
                     </div>

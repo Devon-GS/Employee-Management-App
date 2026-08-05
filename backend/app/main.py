@@ -12,11 +12,12 @@ from sqlalchemy.orm import Session
 
 from .auth import create_access_token, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
-from .models import ContractFile, Employee, User
+from .models import ContractFile, Employee, EmployeeDocument, User
 from .schemas import (
     ChangePasswordRequest,
     ContractFileResponse,
     EmployeeCreateRequest,
+    EmployeeDocumentResponse,
     EmployeeResponse,
     LoginRequest,
     TokenResponse,
@@ -28,7 +29,12 @@ from .schemas import (
 
 app = FastAPI(title="Employee Management App")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
-ALLOWED_CONTRACT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg"}
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg"}
+DOCUMENT_TYPE_LABELS = {
+    "contract": "Contract",
+    "passport_id_copy": "Passport / ID Copy",
+    "permit_copy": "Permit Copy",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,7 +58,6 @@ DEFAULT_STARTUP_CHECKLIST = {
     "Permit Status": {"done": False, "na": False, "date": None},
     "Passport / ID Copy": {"done": False, "na": False, "date": None},
     "Permit Copy": {"done": False, "na": False, "date": None},
-    "Job Description": {"done": False, "na": False, "date": None},
     "Name for file & Name Badge": {"done": False, "na": False, "date": None},
     "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.": {"done": False, "na": False, "date": None},
     "Start": {"done": False, "na": False, "date": None},
@@ -61,7 +66,7 @@ DEFAULT_STARTUP_CHECKLIST = {
     "Open Weekly Deduction Sheet": {"done": False, "na": False, "date": None},
     "Disciplinary Spreadsheet & Permit Spreadsheet": {"done": False, "na": False, "date": None},
     "Phone No. onto Contacts List": {"done": False, "na": False, "date": None},
-    "Staff Instructions / Training Pack": {"done": False, "na": False, "date": None},
+    "Staff Instructions / Training Pack / Job Description": {"done": False, "na": False, "date": None},
 }
 
 
@@ -73,6 +78,14 @@ def normalize_startup_data(data: dict | None) -> dict:
     normalized = build_startup_defaults()
     if not data:
         return normalized
+
+    legacy_job_description = data.get("Job Description") if isinstance(data, dict) else None
+    if (
+        isinstance(legacy_job_description, dict)
+        and "Staff Instructions / Training Pack / Job Description" not in data
+    ):
+        data = dict(data)
+        data["Staff Instructions / Training Pack / Job Description"] = legacy_job_description
 
     for key, value in data.items():
         if key in normalized and isinstance(value, dict):
@@ -265,6 +278,16 @@ def _contract_file_path(stored_filename: str) -> Path:
     return UPLOAD_DIR / stored_filename
 
 
+def _document_path(stored_filename: str) -> Path:
+    return UPLOAD_DIR / stored_filename
+
+
+def _normalize_document_type(document_type: str) -> str:
+    if document_type not in DOCUMENT_TYPE_LABELS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document type")
+    return document_type
+
+
 @app.get("/api/employees/{employee_id}/contract-files", response_model=list[ContractFileResponse])
 def list_contract_files(
     employee_id: int,
@@ -388,6 +411,142 @@ def delete_contract_file(
 
     file_path = _contract_file_path(contract_file.stored_filename)
     db.delete(contract_file)
+    db.commit()
+
+    def remove_file(path: Path) -> None:
+        if path.exists():
+            path.unlink()
+
+    background_tasks.add_task(remove_file, file_path)
+    return {"message": "File deleted successfully"}
+
+
+@app.get("/api/employees/{employee_id}/documents/{document_type}", response_model=list[EmployeeDocumentResponse])
+def list_employee_documents(
+    employee_id: int,
+    document_type: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[EmployeeDocumentResponse]:
+    _get_employee_or_404(db, employee_id)
+    document_type = _normalize_document_type(document_type)
+    documents = db.scalars(
+        select(EmployeeDocument)
+        .where(EmployeeDocument.employee_id == employee_id, EmployeeDocument.document_type == document_type)
+        .order_by(EmployeeDocument.id.asc())
+    ).all()
+    return documents
+
+
+@app.post(
+    "/api/employees/{employee_id}/documents/{document_type}",
+    response_model=list[EmployeeDocumentResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_employee_documents(
+    employee_id: int,
+    document_type: str,
+    files: list[UploadFile] = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[EmployeeDocumentResponse]:
+    _get_employee_or_404(db, employee_id)
+    document_type = _normalize_document_type(document_type)
+
+    for file in files:
+        original_name = file.filename or ""
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File must be a .pdf, .doc, .docx, .jpg, or .jpeg",
+            )
+
+    created_documents: list[EmployeeDocument] = []
+
+    for file in files:
+        original_name = file.filename or ""
+        suffix = Path(original_name).suffix.lower()
+
+        stored_filename = f"{uuid4().hex}{suffix}"
+        destination = _document_path(stored_filename)
+
+        size_bytes = 0
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                buffer.write(chunk)
+
+        created_documents.append(
+            EmployeeDocument(
+                employee_id=employee_id,
+                document_type=document_type,
+                original_filename=original_name,
+                stored_filename=stored_filename,
+                content_type=file.content_type or "application/octet-stream",
+                size_bytes=size_bytes,
+            )
+        )
+
+    db.add_all(created_documents)
+    db.commit()
+    for document in created_documents:
+        db.refresh(document)
+    return created_documents
+
+
+@app.get("/api/documents/{document_id}/download")
+def download_employee_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    document = db.get(EmployeeDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    path = _document_path(document.stored_filename)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
+
+    return FileResponse(path, media_type=document.content_type, filename=document.original_filename)
+
+
+@app.get("/api/documents/{document_id}/view")
+def view_employee_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    document = db.get(EmployeeDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    path = _document_path(document.stored_filename)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
+
+    response = FileResponse(path, media_type=document.content_type, filename=document.original_filename)
+    response.headers["Content-Disposition"] = f'inline; filename="{document.original_filename}"'
+    return response
+
+
+@app.delete("/api/documents/{document_id}")
+def delete_employee_document(
+    document_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    document = db.get(EmployeeDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    file_path = _document_path(document.stored_filename)
+    db.delete(document)
     db.commit()
 
     def remove_file(path: Path) -> None:

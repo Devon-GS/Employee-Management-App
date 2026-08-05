@@ -54,3 +54,14 @@ class ContractFileResponse(BaseModel):
     original_filename: str
     content_type: str
     size_bytes: int
+
+
+class EmployeeDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_id: int
+    document_type: str
+    original_filename: str
+    content_type: str
+    size_bytes: int

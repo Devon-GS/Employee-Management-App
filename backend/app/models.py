@@ -32,3 +32,15 @@ class ContractFile(Base):
     stored_filename: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class EmployeeDocument(Base):
+    __tablename__ = "employee_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True, nullable=False)
+    document_type: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_filename: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

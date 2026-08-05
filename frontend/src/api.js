@@ -216,3 +216,78 @@ export async function downloadContractFile(token, fileId, filename) {
   anchor.remove();
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
+
+export async function fetchEmployeeDocuments(token, employeeId, documentType) {
+  const response = await fetch(`/api/employees/${employeeId}/documents/${documentType}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load documents");
+  }
+
+  return data;
+}
+
+export async function uploadEmployeeDocuments(token, employeeId, documentType, files) {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  const response = await fetch(`/api/employees/${employeeId}/documents/${documentType}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to upload documents");
+  }
+
+  return data;
+}
+
+export async function deleteEmployeeDocument(token, documentId) {
+  const response = await fetch(`/api/documents/${documentId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to delete file");
+  }
+
+  return data;
+}
+
+export async function viewEmployeeDocument(token, documentId) {
+  const blob = await fetchFileBlob(token, `/api/documents/${documentId}/view`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+export async function downloadEmployeeDocument(token, documentId, filename) {
+  const blob = await fetchFileBlob(token, `/api/documents/${documentId}/download`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
