@@ -264,6 +264,14 @@ export default function EmployeeStartupPage() {
     updateRow("Contract Status", { date });
   }
 
+  function handlePermitStatusDateChange(date) {
+    updateRow("Permit Status", {
+      date,
+      done: Boolean(date),
+      na: false,
+    });
+  }
+
   function closeContractStatusModal() {
     if (!contractStatusSaving) {
       setContractStatusModalOpen(false);
@@ -469,7 +477,9 @@ export default function EmployeeStartupPage() {
                           onChange={(event) =>
                             item.isContractStatus
                               ? handleContractStatusDateChange(event.target.value)
-                              : updateRow(item.label, { date: event.target.value })
+                              : item.label === "Permit Status"
+                                ? handlePermitStatusDateChange(event.target.value)
+                                : updateRow(item.label, { date: event.target.value })
                           }
                           className="date-input"
                         />
