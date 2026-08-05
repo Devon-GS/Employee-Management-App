@@ -24,7 +24,7 @@ const DOCUMENT_ROWS = [
   { label: "Passport / ID Copy", documentType: "passport_id_copy", isStatus: false },
   { label: "Permit Copy", documentType: "permit_copy", isStatus: false },
   { label: "Name for file & Name Badge", isStatus: false },
-  { label: "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.", isStatus: false },
+  { label: "Uniform & Uniform Care Letter", uniformAction: true, isStatus: false },
   { label: "Start", isStatus: false },
   { label: "UIF", isStatus: false },
   { label: "MIBCO reg", isStatus: false },
@@ -40,6 +40,8 @@ const DOCUMENT_LABELS = {
   contract: "Contract",
   passport_id_copy: "Passport / ID Copy",
   permit_copy: "Permit Copy",
+  uniform_issue: "Uniform Issue",
+  uniform_care_letter: "Uniform Care Letter",
 };
 
 function buildDefaultChecklist() {
@@ -96,6 +98,8 @@ function emptyDocumentGroups() {
     contract: [],
     passport_id_copy: [],
     permit_copy: [],
+    uniform_issue: [],
+    uniform_care_letter: [],
   };
 }
 
@@ -128,6 +132,7 @@ export default function EmployeeStartupPage() {
   });
   const [contractStatusSaving, setContractStatusSaving] = useState(false);
   const [contractStatusError, setContractStatusError] = useState("");
+  const [uniformActionsModalOpen, setUniformActionsModalOpen] = useState(false);
 
   async function loadDocumentsForType(documentType) {
     if (documentType === "contract") {
@@ -136,22 +141,30 @@ export default function EmployeeStartupPage() {
     return fetchEmployeeDocuments(token, employeeId, documentType);
   }
 
+  async function loadAllDocumentGroups() {
+    const [contract, passportIdCopy, permitCopy, uniformIssue, uniformCareLetter] = await Promise.all([
+      loadDocumentsForType("contract"),
+      loadDocumentsForType("passport_id_copy"),
+      loadDocumentsForType("permit_copy"),
+      loadDocumentsForType("uniform_issue"),
+      loadDocumentsForType("uniform_care_letter"),
+    ]);
+
+    return {
+      contract,
+      passport_id_copy: passportIdCopy,
+      permit_copy: permitCopy,
+      uniform_issue: uniformIssue,
+      uniform_care_letter: uniformCareLetter,
+    };
+  }
+
   async function refreshDocumentGroups() {
     setDocumentLoading(true);
     setDocumentError("");
 
     try {
-      const [contract, passportIdCopy, permitCopy] = await Promise.all([
-        loadDocumentsForType("contract"),
-        loadDocumentsForType("passport_id_copy"),
-        loadDocumentsForType("permit_copy"),
-      ]);
-
-      setDocumentGroups({
-        contract,
-        passport_id_copy: passportIdCopy,
-        permit_copy: permitCopy,
-      });
+      setDocumentGroups(await loadAllDocumentGroups());
     } catch (err) {
       setDocumentError(err.message || "Unable to load uploaded files");
     } finally {
@@ -194,17 +207,9 @@ export default function EmployeeStartupPage() {
         setIsDirty(false);
 
         try {
-          const [contract, passportIdCopy, permitCopy] = await Promise.all([
-            loadDocumentsForType("contract"),
-            loadDocumentsForType("passport_id_copy"),
-            loadDocumentsForType("permit_copy"),
-          ]);
+          const loadedDocumentGroups = await loadAllDocumentGroups();
           if (mounted) {
-            setDocumentGroups({
-              contract,
-              passport_id_copy: passportIdCopy,
-              permit_copy: permitCopy,
-            });
+            setDocumentGroups(loadedDocumentGroups);
           }
         } catch {
           if (mounted) {
@@ -285,6 +290,25 @@ export default function EmployeeStartupPage() {
     }
   }
 
+  function openUniformActionsModal() {
+    setUniformActionsModalOpen(true);
+    setDocumentError("");
+    setDocumentMessage("");
+  }
+
+  function closeUniformActionsModal() {
+    setUniformActionsModalOpen(false);
+    setDocumentError("");
+    setDocumentMessage("");
+  }
+
+  function openUniformEditorModal() {
+    setUniformActionsModalOpen(false);
+    setDocumentError("");
+    setDocumentMessage("");
+    navigate(`/employees/${employeeId}/edit-uniform`);
+  }
+
   function openContractStatusModal() {
     const row = getContractStatusRow(checklist);
     setContractStatusDraft({
@@ -350,9 +374,9 @@ export default function EmployeeStartupPage() {
     }
   }
 
-  async function handleViewDocument(documentId) {
+  async function handleViewDocument(documentType, documentId) {
     try {
-      if (activeDocumentType === "contract") {
+      if (documentType === "contract") {
         await viewContractFile(token, documentId);
       } else {
         await viewEmployeeDocument(token, documentId);
@@ -362,9 +386,9 @@ export default function EmployeeStartupPage() {
     }
   }
 
-  async function handleDownloadDocument(document) {
+  async function handleDownloadDocument(documentType, document) {
     try {
-      if (activeDocumentType === "contract") {
+      if (documentType === "contract") {
         await downloadContractFile(token, document.id, document.original_filename);
       } else {
         await downloadEmployeeDocument(token, document.id, document.original_filename);
@@ -374,14 +398,14 @@ export default function EmployeeStartupPage() {
     }
   }
 
-  async function handleDeleteDocument(documentId) {
+  async function handleDeleteDocument(documentType, documentId) {
     const confirmed = window.confirm("Delete this uploaded file?");
     if (!confirmed) {
       return;
     }
 
     try {
-      if (activeDocumentType === "contract") {
+      if (documentType === "contract") {
         await deleteContractFile(token, documentId);
       } else {
         await deleteEmployeeDocument(token, documentId);
@@ -391,6 +415,21 @@ export default function EmployeeStartupPage() {
     } catch (err) {
       setDocumentError(err.message || "Unable to delete file");
     }
+  }
+
+  function getLatestDocument(documentType) {
+    const documents = documentGroups[documentType] || [];
+    return documents.length ? documents[documents.length - 1] : null;
+  }
+
+  async function handleUniformDownload(documentType) {
+    const document = getLatestDocument(documentType);
+    if (!document) {
+      setDocumentError(`No ${DOCUMENT_LABELS[documentType].toLowerCase()} uploaded yet.`);
+      return;
+    }
+
+    await handleDownloadDocument(documentType, document);
   }
 
   async function handleContractStatusSave() {
@@ -487,6 +526,8 @@ export default function EmployeeStartupPage() {
                   ? `${getDocumentCount(item.documentType)} Uploaded`
                   : item.label === "Contract Status"
                     ? contractStatusRow.info || "-"
+                    : item.uniformAction
+                      ? "-"
                     : "-";
 
                 return (
@@ -494,6 +535,10 @@ export default function EmployeeStartupPage() {
                     <td>
                       {item.documentType ? (
                         <button type="button" className="startup-link" onClick={() => openDocumentModal(item.documentType)}>
+                          {item.label}
+                        </button>
+                      ) : item.uniformAction ? (
+                        <button type="button" className="startup-link" onClick={openUniformActionsModal}>
                           {item.label}
                         </button>
                       ) : item.label === "Contract Status" ? (
@@ -618,13 +663,13 @@ export default function EmployeeStartupPage() {
                       <span>{formatBytes(document.size_bytes)}</span>
                     </div>
                     <div className="table-actions">
-                      <button className="secondary-button" type="button" onClick={() => handleViewDocument(document.id)}>
+                      <button className="secondary-button" type="button" onClick={() => handleViewDocument(activeDocumentType, document.id)}>
                         View
                       </button>
-                      <button className="secondary-button" type="button" onClick={() => handleDownloadDocument(document)}>
+                      <button className="secondary-button" type="button" onClick={() => handleDownloadDocument(activeDocumentType, document)}>
                         Download
                       </button>
-                      <button className="secondary-button" type="button" onClick={() => handleDeleteDocument(document.id)}>
+                      <button className="secondary-button" type="button" onClick={() => handleDeleteDocument(activeDocumentType, document.id)}>
                         Delete
                       </button>
                     </div>
@@ -632,6 +677,44 @@ export default function EmployeeStartupPage() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {uniformActionsModalOpen ? (
+        <div className="modal-backdrop" onClick={closeUniformActionsModal}>
+          <div className="modal-card contract-modal uniform-actions-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Uniform & Uniform Care Letter</h2>
+              <button className="icon-button" type="button" onClick={closeUniformActionsModal}>
+                ×
+              </button>
+            </div>
+
+            <div className="uniform-actions-grid">
+              <button className="primary-button" type="button" onClick={openUniformEditorModal}>
+                Edit Uniform Issue
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => handleUniformDownload("uniform_issue")}
+                disabled={!getLatestDocument("uniform_issue")}
+              >
+                Download Uniform Issue
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => handleUniformDownload("uniform_care_letter")}
+                disabled={!getLatestDocument("uniform_care_letter")}
+              >
+                Download Uniform Care Letter
+              </button>
+            </div>
+
+            {documentError ? <div className="error-banner">{documentError}</div> : null}
+            {documentMessage ? <div className="success-banner">{documentMessage}</div> : null}
           </div>
         </div>
       ) : null}

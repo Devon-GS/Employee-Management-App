@@ -108,6 +108,22 @@ export async function fetchEmployeeStartup(token, employeeId) {
   return data;
 }
 
+export async function fetchEmployee(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load employee");
+  }
+
+  return data;
+}
+
 export async function saveEmployeeStartup(token, employeeId, checklist) {
   const response = await fetch(`/api/employees/${employeeId}/startup`, {
     method: "PUT",

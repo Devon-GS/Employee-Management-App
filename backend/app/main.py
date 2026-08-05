@@ -34,6 +34,8 @@ DOCUMENT_TYPE_LABELS = {
     "contract": "Contract",
     "passport_id_copy": "Passport / ID Copy",
     "permit_copy": "Permit Copy",
+    "uniform_issue": "Uniform Issue",
+    "uniform_care_letter": "Uniform Care Letter",
 }
 
 app.add_middleware(
@@ -59,7 +61,7 @@ DEFAULT_STARTUP_CHECKLIST = {
     "Passport / ID Copy": {"done": False, "na": False, "date": None},
     "Permit Copy": {"done": False, "na": False, "date": None},
     "Name for file & Name Badge": {"done": False, "na": False, "date": None},
-    "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.": {"done": False, "na": False, "date": None},
+    "Uniform & Uniform Care Letter": {"done": False, "na": False, "date": None},
     "Start": {"done": False, "na": False, "date": None},
     "UIF": {"done": False, "na": False, "date": None},
     "MIBCO reg": {"done": False, "na": False, "date": None},
@@ -80,12 +82,19 @@ def normalize_startup_data(data: dict | None) -> dict:
         return normalized
 
     legacy_job_description = data.get("Job Description") if isinstance(data, dict) else None
+    legacy_uniform_row = data.get("Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.") if isinstance(data, dict) else None
     if (
         isinstance(legacy_job_description, dict)
         and "Staff Instructions / Training Pack / Job Description" not in data
     ):
         data = dict(data)
         data["Staff Instructions / Training Pack / Job Description"] = legacy_job_description
+    if (
+        isinstance(legacy_uniform_row, dict)
+        and "Uniform & Uniform Care Letter" not in data
+    ):
+        data = dict(data)
+        data["Uniform & Uniform Care Letter"] = legacy_uniform_row
 
     for key, value in data.items():
         if key in normalized and isinstance(value, dict):

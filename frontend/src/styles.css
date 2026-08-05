@@ -233,6 +233,10 @@ input {
   backdrop-filter: blur(12px);
 }
 
+.uniform-panel {
+  grid-template-columns: 1fr;
+}
+
 .panel-copy h1 {
   margin: 0;
   font-size: clamp(2rem, 4vw, 3.3rem);
@@ -435,6 +439,14 @@ input {
   width: min(980px, 100%);
 }
 
+.uniform-actions-modal {
+  width: min(720px, 100%);
+}
+
+.uniform-editor-modal {
+  width: min(1180px, 100%);
+}
+
 .contract-status-modal {
   width: min(680px, 100%);
 }
@@ -498,6 +510,86 @@ input {
   justify-content: flex-end;
 }
 
+.uniform-actions-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.uniform-documents-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.uniform-document-section {
+  border: 1px solid rgba(19, 32, 51, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.uniform-document-section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.uniform-document-section-header h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.uniform-edit-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1180px;
+}
+
+.uniform-edit-table th,
+.uniform-edit-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(19, 32, 51, 0.1);
+  vertical-align: top;
+  text-align: left;
+}
+
+.uniform-edit-table th {
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.uniform-edit-table input,
+.uniform-edit-table select,
+.uniform-edit-table textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(19, 32, 51, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+}
+
+.uniform-edit-table textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.uniform-name-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 1rem;
+}
+
+.uniform-name-line strong {
+  color: var(--text);
+}
+
 @media (max-width: 700px) {
   .contract-file-row {
     grid-template-columns: 1fr;
@@ -506,6 +598,10 @@ input {
   .contract-file-row .table-actions {
     justify-self: start;
     flex-wrap: wrap;
+  }
+
+  .uniform-documents-grid {
+    grid-template-columns: 1fr;
   }
 }
 
