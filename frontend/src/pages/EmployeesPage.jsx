@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { createEmployee, fetchEmployees } from "../api";
+import { createEmployee, fetchEmployees, updateEmployee } from "../api";
 import Navbar from "../components/Navbar";
 
 const DEPARTMENT_OPTIONS = ["Forecourt", "Cashier", "Baker", "Car Wash"];
@@ -12,16 +12,19 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editingEmployeeId, setEditingEmployeeId] = useState(null);
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
   const [passportId, setPassportId] = useState("");
-  const [error, setError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     async function loadEmployees() {
+      setPageError("");
       try {
         const data = await fetchEmployees(token);
         if (mounted) {
@@ -29,7 +32,7 @@ export default function EmployeesPage() {
         }
       } catch (err) {
         if (mounted) {
-          setError(err.message || "Unable to load employees");
+          setPageError(err.message || "Unable to load employees");
         }
       } finally {
         if (mounted) {
@@ -45,41 +48,72 @@ export default function EmployeesPage() {
     };
   }, [token]);
 
-  function openModal() {
-    setName("");
-    setDepartment("");
-    setPassportId("");
-    setError("");
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape" && showModal) {
+        closeModal();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showModal, submitting]);
+
+  function resetForm(employee = null) {
+    setEditingEmployeeId(employee?.id ?? null);
+    setName(employee?.name ?? "");
+    setDepartment(employee?.department ?? "");
+    setPassportId(employee?.passport_id ?? "");
+    setFormError("");
+  }
+
+  function openCreateModal() {
+    resetForm();
+    setShowModal(true);
+  }
+
+  function openEditModal(employee) {
+    resetForm(employee);
     setShowModal(true);
   }
 
   function closeModal() {
     if (!submitting) {
       setShowModal(false);
-      setError("");
+      setFormError("");
     }
   }
 
   async function handleSave(event) {
     event.preventDefault();
     setSubmitting(true);
-    setError("");
+    setFormError("");
 
     if (!department) {
-      setError("Please select a department.");
+      setFormError("Please select a department.");
       setSubmitting(false);
       return;
     }
 
     try {
-      const newEmployee = await createEmployee(token, name, department, passportId);
-      setEmployees((current) => [...current, newEmployee].sort((a, b) => a.name.localeCompare(b.name)));
+      const savedEmployee = editingEmployeeId
+        ? await updateEmployee(token, editingEmployeeId, name, department, passportId)
+        : await createEmployee(token, name, department, passportId);
+
+      setEmployees((current) => {
+        const nextEmployees = editingEmployeeId
+          ? current.map((employee) => (employee.id === savedEmployee.id ? savedEmployee : employee))
+          : [...current, savedEmployee];
+
+        return nextEmployees.sort((a, b) => a.name.localeCompare(b.name));
+      });
       setShowModal(false);
-      setName("");
-      setDepartment("");
-      setPassportId("");
+      resetForm();
     } catch (err) {
-      setError(err.message || "Unable to create employee");
+      setFormError(err.message || (editingEmployeeId ? "Unable to update employee" : "Unable to create employee"));
     } finally {
       setSubmitting(false);
     }
@@ -95,10 +129,12 @@ export default function EmployeesPage() {
             <h1>Employees</h1>
             <p className="subtitle">Add and review employee records in alphabetical order.</p>
           </div>
-          <button className="primary-button" type="button" onClick={openModal}>
+          <button className="primary-button" type="button" onClick={openCreateModal}>
             Add Employee
           </button>
         </div>
+
+        {pageError ? <div className="error-banner">{pageError}</div> : null}
 
         <div className="table-wrap">
           {loading ? (
@@ -131,6 +167,26 @@ export default function EmployeesPage() {
                           Startup
                         </button>
                         <button className="secondary-button" type="button">
+                          Bank Acc
+                        </button>
+                        <button className="secondary-button" type="button">
+                          Written Warning
+                        </button>
+                        <button className="secondary-button" type="button">
+                          General
+                        </button>
+                        <button className="secondary-button" type="button">
+                          Delete
+                        </button>
+                        <button className="secondary-button edit-button" type="button" onClick={() => openEditModal(employee)}>
+                          <svg
+                            className="action-icon"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                            focusable="false"
+                          >
+                            <path d="M4 17.25V20h2.75l8.1-8.1-2.75-2.75L4 17.25Zm14.71-8.04a1 1 0 0 0 0-1.42l-2.5-2.5a1 1 0 0 0-1.42 0l-1.94 1.94 3.92 3.92 1.94-1.94Z" />
+                          </svg>
                           Edit
                         </button>
                       </div>
@@ -147,7 +203,7 @@ export default function EmployeesPage() {
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
-              <h2>Add Employee</h2>
+              <h2>{editingEmployeeId ? "Edit Employee" : "Add Employee"}</h2>
               <button className="icon-button" type="button" onClick={closeModal}>
                 ×
               </button>
@@ -179,7 +235,7 @@ export default function EmployeesPage() {
                   onChange={(event) => setPassportId(event.target.value)}
                 />
               </label>
-              {error ? <div className="error-banner">{error}</div> : null}
+              {formError ? <div className="error-banner">{formError}</div> : null}
               <div className="form-actions">
                 <button className="secondary-button" type="button" onClick={closeModal}>
                   Cancel

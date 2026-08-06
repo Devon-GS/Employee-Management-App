@@ -93,6 +93,29 @@ export async function createEmployee(token, name, department, passportId) {
   return data;
 }
 
+export async function updateEmployee(token, employeeId, name, department, passportId) {
+  const response = await fetch(`/api/employees/${employeeId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      name,
+      department,
+      passport_id: passportId,
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to update employee");
+  }
+
+  return data;
+}
+
 export async function fetchEmployeeStartup(token, employeeId) {
   const response = await fetch(`/api/employees/${employeeId}/startup`, {
     headers: {
