@@ -4,6 +4,8 @@ import { useAuth } from "../auth/AuthContext";
 import { createEmployee, fetchEmployees } from "../api";
 import Navbar from "../components/Navbar";
 
+const DEPARTMENT_OPTIONS = ["Forecourt", "Cashier", "Baker", "Car Wash"];
+
 export default function EmployeesPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
@@ -11,6 +13,7 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState("");
+  const [department, setDepartment] = useState("");
   const [passportId, setPassportId] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -44,6 +47,7 @@ export default function EmployeesPage() {
 
   function openModal() {
     setName("");
+    setDepartment("");
     setPassportId("");
     setError("");
     setShowModal(true);
@@ -61,11 +65,18 @@ export default function EmployeesPage() {
     setSubmitting(true);
     setError("");
 
+    if (!department) {
+      setError("Please select a department.");
+      setSubmitting(false);
+      return;
+    }
+
     try {
-      const newEmployee = await createEmployee(token, name, passportId);
+      const newEmployee = await createEmployee(token, name, department, passportId);
       setEmployees((current) => [...current, newEmployee].sort((a, b) => a.name.localeCompare(b.name)));
       setShowModal(false);
       setName("");
+      setDepartment("");
       setPassportId("");
     } catch (err) {
       setError(err.message || "Unable to create employee");
@@ -99,6 +110,7 @@ export default function EmployeesPage() {
               <thead>
                 <tr>
                   <th>Employee name</th>
+                  <th>Department</th>
                   <th>Passport/ID</th>
                   <th>Actions</th>
                 </tr>
@@ -107,6 +119,7 @@ export default function EmployeesPage() {
                 {employees.map((employee) => (
                   <tr key={employee.id}>
                     <td>{employee.name}</td>
+                    <td>{employee.department || "-"}</td>
                     <td>{employee.passport_id}</td>
                     <td>
                       <div className="table-actions">
@@ -149,6 +162,17 @@ export default function EmployeesPage() {
                 />
               </label>
               <label>
+                Department
+                <select value={department} onChange={(event) => setDepartment(event.target.value)} required>
+                  <option value="">Select department</option>
+                  {DEPARTMENT_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Passport/ID
                 <input
                   value={passportId}
@@ -160,7 +184,7 @@ export default function EmployeesPage() {
                 <button className="secondary-button" type="button" onClick={closeModal}>
                   Cancel
                 </button>
-                <button className="primary-button" type="submit" disabled={submitting}>
+                <button className="primary-button" type="submit" disabled={submitting || !department}>
                   {submitting ? "Saving..." : "Save"}
                 </button>
               </div>

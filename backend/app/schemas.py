@@ -25,6 +25,7 @@ class ChangePasswordRequest(BaseModel):
 
 class EmployeeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
 
 
@@ -33,12 +34,14 @@ class EmployeeResponse(BaseModel):
 
     id: int
     name: str
+    department: str | None = None
     passport_id: str
     startup_data: dict = Field(default_factory=dict)
 
 
 class EmployeeUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
 
 

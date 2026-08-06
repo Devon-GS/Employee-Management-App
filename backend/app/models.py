@@ -19,6 +19,7 @@ class Employee(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
+    department: Mapped[str | None] = mapped_column(String(50), nullable=True)
     passport_id: Mapped[str] = mapped_column(String(120), nullable=False)
     startup_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 

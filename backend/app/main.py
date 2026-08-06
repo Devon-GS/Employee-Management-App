@@ -131,6 +131,11 @@ def startup_event() -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS department VARCHAR(50)"
+            )
+        )
+        connection.execute(
+            text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
                 "uq_employees_passport_id ON employees (passport_id)"
             )
@@ -208,6 +213,7 @@ def create_employee(
 
     employee = Employee(
         name=payload.name.strip(),
+        department=payload.department.strip(),
         passport_id=passport_id,
         startup_data=build_startup_defaults(),
     )
@@ -252,6 +258,7 @@ def update_employee(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Passport/ID must be unique")
 
     employee.name = payload.name.strip()
+    employee.department = payload.department.strip()
     employee.passport_id = passport_id
     db.add(employee)
     try:
@@ -401,6 +408,12 @@ def _uniform_issue_rows_from_workbook(workbook) -> dict[str, dict[str, str]]:
     return rows
 
 
+def _is_hidden_uniform_issue_workbook(document: EmployeeDocument) -> bool:
+    return document.document_type == "uniform_issue" and (
+        document.stored_filename.startswith("uniform_issue_") or document.original_filename.startswith("ISSUE-Uniforms - ")
+    )
+
+
 @app.get("/api/employees/{employee_id}/contract-files", response_model=list[ContractFileResponse])
 def list_contract_files(
     employee_id: int,
@@ -543,11 +556,15 @@ def list_employee_documents(
 ) -> list[EmployeeDocumentResponse]:
     _get_employee_or_404(db, employee_id)
     document_type = _normalize_document_type(document_type)
-    documents = db.scalars(
+    documents = list(
+        db.scalars(
         select(EmployeeDocument)
         .where(EmployeeDocument.employee_id == employee_id, EmployeeDocument.document_type == document_type)
         .order_by(EmployeeDocument.id.asc())
-    ).all()
+        ).all()
+    )
+    if document_type == "uniform_issue":
+        documents = [document for document in documents if not _is_hidden_uniform_issue_workbook(document)]
     return documents
 
 
@@ -704,6 +721,24 @@ def get_uniform_issue_document(
         employee_name=employee.name,
         rows=_uniform_issue_rows_from_workbook(workbook),
     )
+
+
+@app.get("/api/employees/{employee_id}/uniform-issue-workbook/download")
+def download_uniform_issue_workbook(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    _get_employee_or_404(db, employee_id)
+    document = _latest_uniform_issue_document(db, employee_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uniform issue file not found")
+
+    path = _uniform_issue_document_path(document)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
+
+    return FileResponse(path, media_type=document.content_type, filename=document.original_filename)
 
 
 @app.get("/api/documents/{document_id}/download")

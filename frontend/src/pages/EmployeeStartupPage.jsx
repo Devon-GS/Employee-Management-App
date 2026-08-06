@@ -4,9 +4,11 @@ import {
   deleteContractFile,
   deleteEmployeeDocument,
   downloadContractFile,
+  downloadUniformIssueWorkbook,
   downloadEmployeeDocument,
   fetchContractFiles,
   fetchEmployeeDocuments,
+  fetchUniformIssue,
   fetchEmployeeStartup,
   saveEmployeeStartup,
   uploadContractFiles,
@@ -124,6 +126,7 @@ export default function EmployeeStartupPage() {
   const [documentError, setDocumentError] = useState("");
   const [documentMessage, setDocumentMessage] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [uniformIssueWorkbookAvailable, setUniformIssueWorkbookAvailable] = useState(false);
   const [contractStatusModalOpen, setContractStatusModalOpen] = useState(false);
   const [contractStatusDraft, setContractStatusDraft] = useState({
     status: "",
@@ -214,6 +217,17 @@ export default function EmployeeStartupPage() {
         } catch {
           if (mounted) {
             setDocumentGroups(emptyDocumentGroups());
+          }
+        }
+
+        try {
+          const savedUniformIssue = await fetchUniformIssue(token, employeeId);
+          if (mounted) {
+            setUniformIssueWorkbookAvailable(Boolean(savedUniformIssue));
+          }
+        } catch {
+          if (mounted) {
+            setUniformIssueWorkbookAvailable(false);
           }
         }
       } catch (err) {
@@ -307,6 +321,11 @@ export default function EmployeeStartupPage() {
     setDocumentError("");
     setDocumentMessage("");
     navigate(`/employees/${employeeId}/edit-uniform`);
+  }
+
+  function openUniformUploadModal() {
+    setUniformActionsModalOpen(false);
+    openDocumentModal("uniform_issue");
   }
 
   function openContractStatusModal() {
@@ -423,6 +442,16 @@ export default function EmployeeStartupPage() {
   }
 
   async function handleUniformDownload(documentType) {
+    if (documentType === "uniform_issue") {
+      if (!uniformIssueWorkbookAvailable) {
+        setDocumentError("No uniform issue saved yet.");
+        return;
+      }
+
+      await downloadUniformIssueWorkbook(token, employeeId, `ISSUE-Uniforms - ${employeeName || "Employee"}.xlsx`);
+      return;
+    }
+
     const document = getLatestDocument(documentType);
     if (!document) {
       setDocumentError(`No ${DOCUMENT_LABELS[documentType].toLowerCase()} uploaded yet.`);
@@ -699,7 +728,7 @@ export default function EmployeeStartupPage() {
                 className="secondary-button"
                 type="button"
                 onClick={() => handleUniformDownload("uniform_issue")}
-                disabled={!getLatestDocument("uniform_issue")}
+                disabled={!uniformIssueWorkbookAvailable}
               >
                 Download Uniform Issue
               </button>
@@ -710,6 +739,9 @@ export default function EmployeeStartupPage() {
                 disabled={!getLatestDocument("uniform_care_letter")}
               >
                 Download Uniform Care Letter
+              </button>
+              <button className="secondary-button" type="button" onClick={openUniformUploadModal}>
+                Upload Uniform Issue
               </button>
             </div>
 

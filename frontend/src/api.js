@@ -70,7 +70,7 @@ export async function fetchEmployees(token) {
   return data;
 }
 
-export async function createEmployee(token, name, passportId) {
+export async function createEmployee(token, name, department, passportId) {
   const response = await fetch("/api/employees", {
     method: "POST",
     headers: {
@@ -79,6 +79,7 @@ export async function createEmployee(token, name, passportId) {
     },
     body: JSON.stringify({
       name,
+      department,
       passport_id: passportId,
     }),
   });
@@ -142,6 +143,18 @@ export async function fetchUniformIssue(token, employeeId) {
   }
 
   return data;
+}
+
+export async function downloadUniformIssueWorkbook(token, employeeId, filename) {
+  const blob = await fetchFileBlob(token, `/api/employees/${employeeId}/uniform-issue-workbook/download`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export async function saveUniformIssue(token, employeeId, rows) {
