@@ -124,6 +124,26 @@ export async function fetchEmployee(token, employeeId) {
   return data;
 }
 
+export async function fetchUniformIssue(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/uniform-issue-workbook`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load uniform issue");
+  }
+
+  return data;
+}
+
 export async function saveUniformIssue(token, employeeId, rows) {
   const response = await fetch(`/api/employees/${employeeId}/documents/uniform_issue/save`, {
     method: "POST",

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { fetchEmployee, saveUniformIssue } from "../api";
+import { useNavigate, useParams } from "react-router-dom";
+import { fetchEmployee, fetchUniformIssue, saveUniformIssue } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
 const UNIFORM_ROWS = [
@@ -31,7 +31,22 @@ function buildUniformRows() {
   }, {});
 }
 
+function buildUniformRowsFromData(data) {
+  const rows = buildUniformRows();
+  const sourceRows = data?.rows || {};
+
+  for (const label of UNIFORM_ROWS) {
+    rows[label] = {
+      ...rows[label],
+      ...(sourceRows[label] || {}),
+    };
+  }
+
+  return rows;
+}
+
 export default function EditUniformPage() {
+  const navigate = useNavigate();
   const { employeeId } = useParams();
   const { token } = useAuth();
   const [employeeName, setEmployeeName] = useState("");
@@ -46,9 +61,15 @@ export default function EditUniformPage() {
 
     async function loadEmployee() {
       try {
-        const employee = await fetchEmployee(token, employeeId);
+        const [employee, savedUniformIssue] = await Promise.all([
+          fetchEmployee(token, employeeId),
+          fetchUniformIssue(token, employeeId),
+        ]);
         if (mounted) {
-          setEmployeeName(employee.name);
+          setEmployeeName(savedUniformIssue?.employee_name || employee.name);
+          if (savedUniformIssue) {
+            setRows(buildUniformRowsFromData(savedUniformIssue));
+          }
         }
       } catch (err) {
         if (mounted) {
@@ -86,6 +107,7 @@ export default function EditUniformPage() {
     try {
       await saveUniformIssue(token, employeeId, rows);
       setMessage("Uniform issue saved successfully.");
+      navigate(`/employees/${employeeId}/startup`, { replace: true });
     } catch (err) {
       setError(err.message || "Unable to save uniform issue");
     } finally {

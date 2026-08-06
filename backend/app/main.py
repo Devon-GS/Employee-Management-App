@@ -27,6 +27,7 @@ from .schemas import (
     StartupChecklistRequest,
     EmployeeUpdateRequest,
     UniformIssueSaveRequest,
+    UniformIssueWorkbookResponse,
 )
 
 
@@ -55,6 +56,7 @@ UNIFORM_ISSUE_ROW_MAP = {
     "BEANIE": 14,
     "SAFTY SHOES": 15,
 }
+UNIFORM_ISSUE_ROW_MAP_BY_ROW = {row: description for description, row in UNIFORM_ISSUE_ROW_MAP.items()}
 
 app.add_middleware(
     CORSMiddleware,
@@ -349,6 +351,56 @@ def _cell_text(value: str | None) -> str | None:
     return text if text else None
 
 
+def _empty_uniform_issue_rows() -> dict[str, dict[str, str]]:
+    return {
+        description: {
+            "size": "",
+            "quantity": "",
+            "condition": "",
+            "details": "",
+            "returns": "",
+            "cost": "",
+        }
+        for description in UNIFORM_ISSUE_ROW_MAP
+    }
+
+
+def _uniform_issue_documents_query(db: Session, employee_id: int) -> list[EmployeeDocument]:
+    return list(
+        db.scalars(
+        select(EmployeeDocument)
+        .where(EmployeeDocument.employee_id == employee_id, EmployeeDocument.document_type == "uniform_issue")
+        .order_by(EmployeeDocument.id.desc())
+        ).all()
+    )
+
+
+def _latest_uniform_issue_document(db: Session, employee_id: int) -> EmployeeDocument | None:
+    documents = _uniform_issue_documents_query(db, employee_id)
+    return documents[0] if documents else None
+
+
+def _uniform_issue_document_path(document: EmployeeDocument) -> Path:
+    return _document_path(document.stored_filename)
+
+
+def _uniform_issue_rows_from_workbook(workbook) -> dict[str, dict[str, str]]:
+    worksheet = workbook["Uniform"] if "Uniform" in workbook.sheetnames else workbook.active
+    rows = _empty_uniform_issue_rows()
+
+    for row_number, description in UNIFORM_ISSUE_ROW_MAP_BY_ROW.items():
+        rows[description] = {
+            "size": _cell_text(worksheet[f"B{row_number}"].value) or "",
+            "quantity": _cell_text(worksheet[f"C{row_number}"].value) or "",
+            "condition": _cell_text(worksheet[f"D{row_number}"].value) or "",
+            "details": _cell_text(worksheet[f"E{row_number}"].value) or "",
+            "returns": _cell_text(worksheet[f"G{row_number}"].value) or "",
+            "cost": _cell_text(worksheet[f"H{row_number}"].value) or "",
+        }
+
+    return rows
+
+
 @app.get("/api/employees/{employee_id}/contract-files", response_model=list[ContractFileResponse])
 def list_contract_files(
     employee_id: int,
@@ -595,10 +647,25 @@ def save_uniform_issue_document(
 
     safe_employee_name = _sanitize_filename_part(employee.name)
     original_filename = f"ISSUE-Uniforms - {safe_employee_name}.xlsx"
-    stored_filename = f"uniform_issue_{employee.id}_{uuid4().hex}.xlsx"
+    stored_filename = f"uniform_issue_{employee.id}.xlsx"
+    temp_output_path = UPLOAD_DIR / f".uniform_issue_{employee.id}_{uuid4().hex}.xlsx"
     output_path = UPLOAD_DIR / stored_filename
 
-    workbook.save(output_path)
+    workbook.save(temp_output_path)
+
+    existing_documents = _uniform_issue_documents_query(db, employee_id)
+    if existing_documents:
+        existing_paths = [_uniform_issue_document_path(document) for document in existing_documents]
+        for existing_document in existing_documents:
+            db.delete(existing_document)
+        db.commit()
+        for existing_path in existing_paths:
+            if existing_path.exists():
+                existing_path.unlink()
+
+    if output_path.exists():
+        output_path.unlink()
+    temp_output_path.replace(output_path)
 
     document = EmployeeDocument(
         employee_id=employee_id,
@@ -612,6 +679,31 @@ def save_uniform_issue_document(
     db.commit()
     db.refresh(document)
     return document
+
+
+@app.get(
+    "/api/employees/{employee_id}/uniform-issue-workbook",
+    response_model=UniformIssueWorkbookResponse,
+)
+def get_uniform_issue_document(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UniformIssueWorkbookResponse:
+    employee = _get_employee_or_404(db, employee_id)
+    document = _latest_uniform_issue_document(db, employee_id)
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uniform issue file not found")
+
+    path = _uniform_issue_document_path(document)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
+
+    workbook = load_workbook(path)
+    return UniformIssueWorkbookResponse(
+        employee_name=employee.name,
+        rows=_uniform_issue_rows_from_workbook(workbook),
+    )
 
 
 @app.get("/api/documents/{document_id}/download")

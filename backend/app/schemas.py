@@ -59,6 +59,11 @@ class UniformIssueSaveRequest(BaseModel):
     rows: dict[str, UniformIssueRowRequest]
 
 
+class UniformIssueWorkbookResponse(BaseModel):
+    employee_name: str
+    rows: dict[str, UniformIssueRowRequest]
+
+
 class ContractFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
