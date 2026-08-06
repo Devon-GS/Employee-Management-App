@@ -46,6 +46,19 @@ class StartupChecklistRequest(BaseModel):
     checklist: dict
 
 
+class UniformIssueRowRequest(BaseModel):
+    size: str = ""
+    quantity: str = ""
+    condition: str = ""
+    details: str = ""
+    returns: str = ""
+    cost: str = ""
+
+
+class UniformIssueSaveRequest(BaseModel):
+    rows: dict[str, UniformIssueRowRequest]
+
+
 class ContractFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

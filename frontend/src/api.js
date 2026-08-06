@@ -124,6 +124,25 @@ export async function fetchEmployee(token, employeeId) {
   return data;
 }
 
+export async function saveUniformIssue(token, employeeId, rows) {
+  const response = await fetch(`/api/employees/${employeeId}/documents/uniform_issue/save`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ rows }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to save uniform issue");
+  }
+
+  return data;
+}
+
 export async function saveEmployeeStartup(token, employeeId, checklist) {
   const response = await fetch(`/api/employees/${employeeId}/startup`, {
     method: "PUT",

@@ -1,5 +1,6 @@
 import copy
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+from openpyxl import load_workbook
 
 from .auth import create_access_token, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
@@ -24,18 +26,34 @@ from .schemas import (
     UserResponse,
     StartupChecklistRequest,
     EmployeeUpdateRequest,
+    UniformIssueSaveRequest,
 )
 
 
 app = FastAPI(title="Employee Management App")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+TEMPLATE_DIR_ENV = os.getenv("TEMPLATE_DIR")
+UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg"}
+ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 DOCUMENT_TYPE_LABELS = {
     "contract": "Contract",
     "passport_id_copy": "Passport / ID Copy",
     "permit_copy": "Permit Copy",
     "uniform_issue": "Uniform Issue",
     "uniform_care_letter": "Uniform Care Letter",
+}
+UNIFORM_ISSUE_ROW_MAP = {
+    "NAME TAG": 7,
+    "FUEL PUMP TAG": 8,
+    "SHIRT": 9,
+    "TROUSERS": 10,
+    "JACKET- LIGHT WEIGHT": 11,
+    "JACKET- PADDED (extra item)": 12,
+    "CAP": 13,
+    "BEANIE": 14,
+    "SAFTY SHOES": 15,
 }
 
 app.add_middleware(
@@ -297,6 +315,40 @@ def _normalize_document_type(document_type: str) -> str:
     return document_type
 
 
+def _uniform_issue_template_path() -> Path:
+    candidates = []
+
+    if TEMPLATE_DIR_ENV:
+        candidates.append(Path(TEMPLATE_DIR_ENV) / "ISSUE-Uniforms.xlsx")
+
+    candidates.extend(
+        [
+            PROJECT_ROOT / "Document Templates" / "ISSUE-Uniforms.xlsx",
+            Path(__file__).resolve().parents[1] / "Document Templates" / "ISSUE-Uniforms.xlsx",
+            Path("/app/Document Templates/ISSUE-Uniforms.xlsx"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[0]
+
+
+def _sanitize_filename_part(value: str) -> str:
+    cleaned = re.sub(r"[^\w\s.-]+", "", value).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned or "employee"
+
+
+def _cell_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+
 @app.get("/api/employees/{employee_id}/contract-files", response_model=list[ContractFileResponse])
 def list_contract_files(
     employee_id: int,
@@ -505,6 +557,61 @@ async def upload_employee_documents(
     for document in created_documents:
         db.refresh(document)
     return created_documents
+
+
+@app.post(
+    "/api/employees/{employee_id}/documents/uniform_issue/save",
+    response_model=EmployeeDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def save_uniform_issue_document(
+    employee_id: int,
+    payload: UniformIssueSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmployeeDocumentResponse:
+    employee = _get_employee_or_404(db, employee_id)
+
+    template_path = _uniform_issue_template_path()
+    if not template_path.exists():
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Uniform template is missing")
+
+    workbook = load_workbook(template_path)
+    worksheet = workbook["Uniform"] if "Uniform" in workbook.sheetnames else workbook.active
+
+    worksheet["A4"] = employee.name
+
+    for description, row_number in UNIFORM_ISSUE_ROW_MAP.items():
+        row_data = payload.rows.get(description)
+        if row_data is None:
+            continue
+
+        worksheet[f"B{row_number}"] = _cell_text(row_data.size)
+        worksheet[f"C{row_number}"] = _cell_text(row_data.quantity)
+        worksheet[f"D{row_number}"] = _cell_text(row_data.condition)
+        worksheet[f"E{row_number}"] = _cell_text(row_data.details)
+        worksheet[f"G{row_number}"] = _cell_text(row_data.returns)
+        worksheet[f"H{row_number}"] = _cell_text(row_data.cost)
+
+    safe_employee_name = _sanitize_filename_part(employee.name)
+    original_filename = f"ISSUE-Uniforms - {safe_employee_name}.xlsx"
+    stored_filename = f"uniform_issue_{employee.id}_{uuid4().hex}.xlsx"
+    output_path = UPLOAD_DIR / stored_filename
+
+    workbook.save(output_path)
+
+    document = EmployeeDocument(
+        employee_id=employee_id,
+        document_type="uniform_issue",
+        original_filename=original_filename,
+        stored_filename=stored_filename,
+        content_type=UNIFORM_ISSUE_MIME_TYPE,
+        size_bytes=output_path.stat().st_size,
+    )
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+    return document
 
 
 @app.get("/api/documents/{document_id}/download")

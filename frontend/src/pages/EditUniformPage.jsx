@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { fetchEmployee } from "../api";
+import { fetchEmployee, saveUniformIssue } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
 const UNIFORM_ROWS = [
@@ -38,6 +38,8 @@ export default function EditUniformPage() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState(buildUniformRows);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -76,6 +78,21 @@ export default function EditUniformPage() {
     }));
   }
 
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+    setMessage("");
+
+    try {
+      await saveUniformIssue(token, employeeId, rows);
+      setMessage("Uniform issue saved successfully.");
+    } catch (err) {
+      setError(err.message || "Unable to save uniform issue");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <main className="dashboard-shell">
       <section className="content-panel uniform-panel">
@@ -89,6 +106,7 @@ export default function EditUniformPage() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
+        {message ? <div className="success-banner">{message}</div> : null}
 
         <div className="table-wrap">
           <table className="uniform-edit-table">
@@ -164,6 +182,12 @@ export default function EditUniformPage() {
               })}
             </tbody>
           </table>
+        </div>
+
+        <div className="startup-actions">
+          <button className="primary-button" type="button" onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save"}
+          </button>
         </div>
       </section>
     </main>

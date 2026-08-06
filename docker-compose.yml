@@ -15,7 +15,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     volumes:
       - uploads_data:/app/uploads
     environment:
