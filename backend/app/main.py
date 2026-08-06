@@ -2,26 +2,35 @@ import copy
 import os
 import re
 from pathlib import Path
+from datetime import date, timedelta
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.exc import IntegrityError
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from openpyxl import load_workbook
 
 from .auth import create_access_token, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
-from .models import ContractFile, Employee, EmployeeDocument, User
+from .models import AnnualLeave, ContractFile, Employee, EmployeeDocument, SickLeave, User
 from .schemas import (
+    AnnualLeaveCreateRequest,
+    AnnualLeaveResponse,
+    AnnualLeaveUpdateRequest,
     ChangePasswordRequest,
     ContractFileResponse,
     EmployeeCreateRequest,
     EmployeeDocumentResponse,
+    EmployeeLeaveReportResponse,
+    EmployeeLeaveSummaryResponse,
     EmployeeResponse,
     LoginRequest,
+    SickLeaveCreateRequest,
+    SickLeaveResponse,
+    SickLeaveUpdateRequest,
     TokenResponse,
     UserResponse,
     StartupChecklistRequest,
@@ -39,6 +48,7 @@ UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreads
 UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".xls", ".xlsx"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
+ALLOWED_MEDICAL_CERT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"}
 DOCUMENT_TYPE_LABELS = {
     "contract": "Contract",
     "passport_id_copy": "Passport / ID Copy",
@@ -146,6 +156,11 @@ def startup_event() -> None:
         )
         connection.execute(
             text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS hire_date DATE NOT NULL DEFAULT CURRENT_DATE"
+            )
+        )
+        connection.execute(
+            text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
                 "uq_employees_passport_id ON employees (passport_id)"
             )
@@ -225,6 +240,7 @@ def create_employee(
         name=payload.name.strip(),
         department=payload.department.strip(),
         passport_id=passport_id,
+        hire_date=payload.hire_date,
         startup_data=build_startup_defaults(),
     )
     db.add(employee)
@@ -270,6 +286,7 @@ def update_employee(
     employee.name = payload.name.strip()
     employee.department = payload.department.strip()
     employee.passport_id = passport_id
+    employee.hire_date = payload.hire_date
     db.add(employee)
     try:
         db.commit()
@@ -448,6 +465,118 @@ def _uniform_issue_rows_from_workbook(workbook) -> dict[str, dict[str, str]]:
 def _is_hidden_uniform_issue_workbook(document: EmployeeDocument) -> bool:
     return document.document_type == "uniform_issue" and (
         document.stored_filename.startswith("uniform_issue_") or document.original_filename.startswith("ISSUE-Uniforms - ")
+    )
+
+
+def calculate_annual_leave_balance(employee_id: int) -> tuple[float, float]:
+    with SessionLocal() as db:
+        employee = db.get(Employee, employee_id)
+        if employee is None:
+            return 0, 0
+
+        hire_date = employee.hire_date
+        today = date.today()
+        months_employed = max(0, (today.year - hire_date.year) * 12 + (today.month - hire_date.month))
+
+        if employee.passport_id == "8601310127086":
+            entitlement = months_employed * (20 / 12)
+        else:
+            entitlement = months_employed * 1.25
+
+        used_days = (
+            db.scalar(
+                select(func.coalesce(func.sum(AnnualLeave.days_used), 0)).where(
+                    AnnualLeave.employee_id == employee_id,
+                    AnnualLeave.status == "Approved",
+                )
+            )
+            or 0
+        )
+    balance = entitlement - float(used_days)
+    return entitlement, balance
+
+
+def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
+    with SessionLocal() as db:
+        employee = db.get(Employee, employee_id)
+        if employee is None:
+            return 0, 0
+
+        hire_date = employee.hire_date
+        today = date.today()
+        days_employed = (today - hire_date).days
+
+        if days_employed < 180:
+            entitlement = 6
+            used_days = (
+                db.scalar(
+                    select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
+                        SickLeave.employee_id == employee_id,
+                        SickLeave.status == "Approved",
+                    )
+                )
+                or 0
+            )
+            return entitlement, max(0, entitlement - float(used_days))
+
+        days_after_six_months = days_employed - 180
+        complete_cycles = days_after_six_months // 1095
+        cycle_start_date = hire_date + timedelta(days=180 + (complete_cycles * 1095))
+
+        used_days = (
+            db.scalar(
+                select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
+                    SickLeave.employee_id == employee_id,
+                    SickLeave.status == "Approved",
+                    SickLeave.start_date >= cycle_start_date,
+                )
+            )
+            or 0
+        )
+
+        entitlement = 30
+        if complete_cycles == 0:
+            probation_used_days = (
+                db.scalar(
+                    select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
+                        SickLeave.employee_id == employee_id,
+                        SickLeave.status == "Approved",
+                        SickLeave.start_date < (hire_date + timedelta(days=180)),
+                    )
+                )
+                or 0
+            )
+            balance = entitlement - float(probation_used_days) - float(used_days)
+        else:
+            balance = entitlement - float(used_days)
+
+        return entitlement, max(0, balance)
+
+
+def _annual_leave_response(leave: AnnualLeave, employee_name: str) -> AnnualLeaveResponse:
+    return AnnualLeaveResponse(
+        id=leave.id,
+        employee_id=leave.employee_id,
+        employee_name=employee_name,
+        start_date=leave.start_date,
+        end_date=leave.end_date,
+        reason=leave.reason,
+        days_used=float(leave.days_used),
+        status=leave.status,
+    )
+
+
+def _sick_leave_response(leave: SickLeave, employee_name: str) -> SickLeaveResponse:
+    return SickLeaveResponse(
+        id=leave.id,
+        employee_id=leave.employee_id,
+        employee_name=employee_name,
+        start_date=leave.start_date,
+        end_date=leave.end_date,
+        reason=leave.reason,
+        days_used=float(leave.days_used),
+        medical_cert=leave.medical_cert,
+        status=leave.status,
     )
 
 
@@ -853,3 +982,276 @@ def delete_employee_document(
 
     background_tasks.add_task(remove_file, file_path)
     return {"message": "File deleted successfully"}
+
+
+def _medical_cert_path(filename: str) -> Path:
+    return UPLOAD_DIR / filename
+
+
+def _delete_medical_cert(filename: str | None) -> None:
+    if not filename:
+        return
+    path = _medical_cert_path(filename)
+    if path.exists():
+        path.unlink()
+
+
+@app.get("/api/annual-leave", response_model=list[AnnualLeaveResponse])
+def list_annual_leave(
+    employee_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[AnnualLeaveResponse]:
+    query = (
+        select(AnnualLeave, Employee.name)
+        .join(Employee, AnnualLeave.employee_id == Employee.id)
+        .order_by(AnnualLeave.start_date.desc(), AnnualLeave.id.desc())
+    )
+    if employee_id is not None:
+        query = query.where(AnnualLeave.employee_id == employee_id)
+
+    rows = db.execute(query).all()
+    return [_annual_leave_response(leave, employee_name) for leave, employee_name in rows]
+
+
+@app.post("/api/annual-leave", response_model=AnnualLeaveResponse, status_code=status.HTTP_201_CREATED)
+def create_annual_leave(
+    payload: AnnualLeaveCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnnualLeaveResponse:
+    employee = _get_employee_or_404(db, payload.employee_id)
+    leave = AnnualLeave(
+        employee_id=payload.employee_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        reason=payload.reason,
+        days_used=payload.days_used,
+        status=payload.status,
+    )
+    db.add(leave)
+    db.commit()
+    db.refresh(leave)
+    return _annual_leave_response(leave, employee.name)
+
+
+@app.put("/api/annual-leave/{leave_id}", response_model=AnnualLeaveResponse)
+def update_annual_leave(
+    leave_id: int,
+    payload: AnnualLeaveUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AnnualLeaveResponse:
+    leave = db.get(AnnualLeave, leave_id)
+    if leave is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annual leave not found")
+
+    leave.start_date = payload.start_date
+    leave.end_date = payload.end_date
+    leave.reason = payload.reason
+    leave.days_used = payload.days_used
+    leave.status = payload.status
+    db.add(leave)
+    db.commit()
+    db.refresh(leave)
+
+    employee = _get_employee_or_404(db, leave.employee_id)
+    return _annual_leave_response(leave, employee.name)
+
+
+@app.delete("/api/annual-leave/{leave_id}")
+def delete_annual_leave(
+    leave_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    leave = db.get(AnnualLeave, leave_id)
+    if leave is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Annual leave not found")
+
+    db.delete(leave)
+    db.commit()
+    return {"message": "Annual leave deleted"}
+
+
+async def _read_sick_leave_payload(request: Request) -> dict:
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        try:
+            start_date = date.fromisoformat(form.get("start_date"))
+            end_date = date.fromisoformat(form.get("end_date"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
+        payload = {
+            "employee_id": int(form.get("employee_id", 0)),
+            "start_date": start_date,
+            "end_date": end_date,
+            "reason": form.get("reason", ""),
+            "days_used": float(form.get("days_used", 0)),
+            "status": form.get("status", "Approved"),
+            "medical_cert": form.get("medical_cert", ""),
+        }
+        medical_cert_file = form.get("medical_cert_file")
+        if medical_cert_file and getattr(medical_cert_file, "filename", ""):
+            suffix = Path(medical_cert_file.filename).suffix.lower()
+            if suffix not in ALLOWED_MEDICAL_CERT_EXTENSIONS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Medical certificate must be a .pdf, .doc, .docx, .jpg, .jpeg, or .png",
+                )
+            stored_filename = f"{uuid4().hex}{suffix}"
+            destination = _medical_cert_path(stored_filename)
+            content = await medical_cert_file.read()
+            destination.write_bytes(content)
+            payload["medical_cert"] = stored_filename
+        return payload
+
+    data = await request.json()
+    try:
+        start_date = date.fromisoformat(data.get("start_date"))
+        end_date = date.fromisoformat(data.get("end_date"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
+    return {
+        "employee_id": int(data.get("employee_id", 0)),
+        "start_date": start_date,
+        "end_date": end_date,
+        "reason": data.get("reason", ""),
+        "days_used": float(data.get("days_used", 0)),
+        "status": data.get("status", "Approved"),
+        "medical_cert": data.get("medical_cert", ""),
+    }
+
+
+@app.get("/api/sick-leave", response_model=list[SickLeaveResponse])
+def list_sick_leave(
+    employee_id: int | None = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[SickLeaveResponse]:
+    query = (
+        select(SickLeave, Employee.name)
+        .join(Employee, SickLeave.employee_id == Employee.id)
+        .order_by(SickLeave.start_date.desc(), SickLeave.id.desc())
+    )
+    if employee_id is not None:
+        query = query.where(SickLeave.employee_id == employee_id)
+
+    rows = db.execute(query).all()
+    return [_sick_leave_response(leave, employee_name) for leave, employee_name in rows]
+
+
+@app.post("/api/sick-leave", response_model=SickLeaveResponse, status_code=status.HTTP_201_CREATED)
+async def create_sick_leave(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SickLeaveResponse:
+    payload = await _read_sick_leave_payload(request)
+    employee = _get_employee_or_404(db, payload["employee_id"])
+    leave = SickLeave(
+        employee_id=payload["employee_id"],
+        start_date=payload["start_date"],
+        end_date=payload["end_date"],
+        reason=payload["reason"],
+        days_used=payload["days_used"],
+        medical_cert=payload["medical_cert"] or None,
+        status=payload["status"],
+    )
+    db.add(leave)
+    db.commit()
+    db.refresh(leave)
+    return _sick_leave_response(leave, employee.name)
+
+
+@app.put("/api/sick-leave/{leave_id}", response_model=SickLeaveResponse)
+async def update_sick_leave(
+    leave_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SickLeaveResponse:
+    leave = db.get(SickLeave, leave_id)
+    if leave is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sick leave not found")
+
+    payload = await _read_sick_leave_payload(request)
+    existing_medical_cert = leave.medical_cert
+    new_medical_cert = payload["medical_cert"] or existing_medical_cert
+
+    if payload["medical_cert"] == "":
+        _delete_medical_cert(existing_medical_cert)
+        new_medical_cert = None
+    elif payload["medical_cert"] and payload["medical_cert"] != existing_medical_cert:
+        _delete_medical_cert(existing_medical_cert)
+
+    leave.start_date = payload["start_date"]
+    leave.end_date = payload["end_date"]
+    leave.reason = payload["reason"]
+    leave.days_used = payload["days_used"]
+    leave.medical_cert = new_medical_cert
+    leave.status = payload["status"]
+    db.add(leave)
+    db.commit()
+    db.refresh(leave)
+
+    employee = _get_employee_or_404(db, leave.employee_id)
+    return _sick_leave_response(leave, employee.name)
+
+
+@app.delete("/api/sick-leave/{leave_id}")
+def delete_sick_leave(
+    leave_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    leave = db.get(SickLeave, leave_id)
+    if leave is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sick leave not found")
+
+    _delete_medical_cert(leave.medical_cert)
+    db.delete(leave)
+    db.commit()
+    return {"message": "Sick leave deleted"}
+
+
+@app.get("/api/employee-leave/report", response_model=EmployeeLeaveReportResponse)
+def employee_leave_report(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmployeeLeaveReportResponse:
+    employees = db.scalars(select(Employee).order_by(Employee.name.asc())).all()
+    annual = db.execute(
+        select(AnnualLeave, Employee.name)
+        .join(Employee, AnnualLeave.employee_id == Employee.id)
+        .order_by(AnnualLeave.start_date.desc(), AnnualLeave.id.desc())
+    ).all()
+    sick = db.execute(
+        select(SickLeave, Employee.name)
+        .join(Employee, SickLeave.employee_id == Employee.id)
+        .order_by(SickLeave.start_date.desc(), SickLeave.id.desc())
+    ).all()
+
+    summary = []
+    for employee in employees:
+        annual_entitlement, annual_balance = calculate_annual_leave_balance(employee.id)
+        sick_entitlement, sick_balance = calculate_sick_leave_balance(employee.id)
+        summary.append(
+            EmployeeLeaveSummaryResponse(
+                id=employee.id,
+                name=employee.name,
+                passport_id=employee.passport_id,
+                hire_date=employee.hire_date,
+                annual_leave_entitlement=round(float(annual_entitlement), 2),
+                annual_leave_balance=round(float(annual_balance), 2),
+                sick_leave_entitlement=round(float(sick_entitlement), 2),
+                sick_leave_balance=round(float(sick_balance), 2),
+            )
+        )
+
+    return EmployeeLeaveReportResponse(
+        employees=summary,
+        annual=[_annual_leave_response(leave, employee_name) for leave, employee_name in annual],
+        sick=[_sick_leave_response(leave, employee_name) for leave, employee_name in sick],
+    )

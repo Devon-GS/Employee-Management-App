@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -27,6 +29,7 @@ class EmployeeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
+    hire_date: date
 
 
 class EmployeeResponse(BaseModel):
@@ -36,6 +39,7 @@ class EmployeeResponse(BaseModel):
     name: str
     department: str | None = None
     passport_id: str
+    hire_date: date
     startup_data: dict = Field(default_factory=dict)
 
 
@@ -43,6 +47,7 @@ class EmployeeUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
+    hire_date: date
 
 
 class StartupChecklistRequest(BaseModel):
@@ -86,3 +91,85 @@ class EmployeeDocumentResponse(BaseModel):
     original_filename: str
     content_type: str
     size_bytes: int
+
+
+class AnnualLeaveCreateRequest(BaseModel):
+    employee_id: int
+    start_date: date
+    end_date: date
+    reason: str = ""
+    days_used: float = Field(gt=0)
+    status: str = "Approved"
+
+
+class AnnualLeaveUpdateRequest(BaseModel):
+    start_date: date
+    end_date: date
+    reason: str = ""
+    days_used: float = Field(gt=0)
+    status: str = "Approved"
+
+
+class AnnualLeaveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_id: int
+    employee_name: str
+    start_date: date
+    end_date: date
+    reason: str | None = None
+    days_used: float
+    status: str
+
+
+class SickLeaveCreateRequest(BaseModel):
+    employee_id: int
+    start_date: date
+    end_date: date
+    reason: str = ""
+    days_used: float = Field(gt=0)
+    status: str = "Approved"
+    medical_cert: str = ""
+
+
+class SickLeaveUpdateRequest(BaseModel):
+    start_date: date
+    end_date: date
+    reason: str = ""
+    days_used: float = Field(gt=0)
+    status: str = "Approved"
+    medical_cert: str = ""
+
+
+class SickLeaveResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    employee_id: int
+    employee_name: str
+    start_date: date
+    end_date: date
+    reason: str | None = None
+    days_used: float
+    medical_cert: str | None = None
+    status: str
+
+
+class EmployeeLeaveSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    passport_id: str
+    hire_date: date
+    annual_leave_entitlement: float
+    annual_leave_balance: float
+    sick_leave_entitlement: float
+    sick_leave_balance: float
+
+
+class EmployeeLeaveReportResponse(BaseModel):
+    employees: list[EmployeeLeaveSummaryResponse]
+    annual: list[AnnualLeaveResponse]
+    sick: list[SickLeaveResponse]

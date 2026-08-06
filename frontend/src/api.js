@@ -70,7 +70,7 @@ export async function fetchEmployees(token) {
   return data;
 }
 
-export async function createEmployee(token, name, department, passportId) {
+export async function createEmployee(token, name, department, passportId, hireDate) {
   const response = await fetch("/api/employees", {
     method: "POST",
     headers: {
@@ -81,6 +81,7 @@ export async function createEmployee(token, name, department, passportId) {
       name,
       department,
       passport_id: passportId,
+      hire_date: hireDate,
     }),
   });
 
@@ -93,7 +94,7 @@ export async function createEmployee(token, name, department, passportId) {
   return data;
 }
 
-export async function updateEmployee(token, employeeId, name, department, passportId) {
+export async function updateEmployee(token, employeeId, name, department, passportId, hireDate) {
   const response = await fetch(`/api/employees/${employeeId}`, {
     method: "PUT",
     headers: {
@@ -104,6 +105,7 @@ export async function updateEmployee(token, employeeId, name, department, passpo
       name,
       department,
       passport_id: passportId,
+      hire_date: hireDate,
     }),
   });
 
@@ -143,6 +145,148 @@ export async function fetchEmployee(token, employeeId) {
 
   if (!response.ok) {
     throw new Error(data.detail || "Unable to load employee");
+  }
+
+  return data;
+}
+
+export async function fetchAnnualLeave(token, employeeId = null) {
+  const query = employeeId ? `?employee_id=${encodeURIComponent(employeeId)}` : "";
+  const response = await fetch(`/api/annual-leave${query}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load annual leave");
+  }
+
+  return data;
+}
+
+export async function createAnnualLeave(token, payload) {
+  const response = await fetch("/api/annual-leave", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to create annual leave");
+  }
+
+  return data;
+}
+
+export async function updateAnnualLeave(token, leaveId, payload) {
+  const response = await fetch(`/api/annual-leave/${leaveId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to update annual leave");
+  }
+
+  return data;
+}
+
+export async function deleteAnnualLeave(token, leaveId) {
+  const response = await fetch(`/api/annual-leave/${leaveId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to delete annual leave");
+  }
+
+  return data;
+}
+
+export async function fetchSickLeave(token, employeeId = null) {
+  const query = employeeId ? `?employee_id=${encodeURIComponent(employeeId)}` : "";
+  const response = await fetch(`/api/sick-leave${query}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load sick leave");
+  }
+
+  return data;
+}
+
+export async function createSickLeave(token, formData) {
+  const response = await fetch("/api/sick-leave", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to create sick leave");
+  }
+
+  return data;
+}
+
+export async function updateSickLeave(token, leaveId, formData) {
+  const response = await fetch(`/api/sick-leave/${leaveId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to update sick leave");
+  }
+
+  return data;
+}
+
+export async function deleteSickLeave(token, leaveId) {
+  const response = await fetch(`/api/sick-leave/${leaveId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to delete sick leave");
   }
 
   return data;

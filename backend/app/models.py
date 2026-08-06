@@ -1,4 +1,6 @@
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from datetime import date
+
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +23,7 @@ class Employee(Base):
     name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     department: Mapped[str | None] = mapped_column(String(50), nullable=True)
     passport_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    hire_date: Mapped[date] = mapped_column(Date, nullable=False)
     startup_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 
@@ -45,3 +48,28 @@ class EmployeeDocument(Base):
     stored_filename: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class AnnualLeave(Base):
+    __tablename__ = "annual_leave"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    days_used: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="Approved")
+
+
+class SickLeave(Base):
+    __tablename__ = "sick_leave"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    days_used: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=0)
+    medical_cert: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="Approved")
