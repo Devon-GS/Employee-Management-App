@@ -36,6 +36,7 @@ UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR_ENV = os.getenv("TEMPLATE_DIR")
 UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 DOCUMENT_TYPE_LABELS = {
@@ -57,6 +58,12 @@ UNIFORM_ISSUE_ROW_MAP = {
     "SAFTY SHOES": 15,
 }
 UNIFORM_ISSUE_ROW_MAP_BY_ROW = {row: description for description, row in UNIFORM_ISSUE_ROW_MAP.items()}
+UNIFORM_CARE_LETTER_FILES = {
+    "Forecourt": "UNIFORM CARE LETTER-Forecourt.docx",
+    "Cashier": "UNIFORM CARE LETTER-Cashiers-Bakers.docx",
+    "Baker": "UNIFORM CARE LETTER-Cashiers-Bakers.docx",
+    "Car Wash": "UNIFORM CARE LETTER-Car-Wash.docx",
+}
 
 app.add_middleware(
     CORSMiddleware,
@@ -282,6 +289,7 @@ def get_employee_startup(
     return {
         "employee_id": employee.id,
         "employee_name": employee.name,
+        "department": employee.department,
         "startup_data": normalize_startup_data(employee.startup_data),
     }
 
@@ -335,6 +343,32 @@ def _uniform_issue_template_path() -> Path:
             PROJECT_ROOT / "Document Templates" / "ISSUE-Uniforms.xlsx",
             Path(__file__).resolve().parents[1] / "Document Templates" / "ISSUE-Uniforms.xlsx",
             Path("/app/Document Templates/ISSUE-Uniforms.xlsx"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[0]
+
+
+def _uniform_care_letter_template_path(department: str | None) -> Path:
+    if not department:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Employee department is missing")
+
+    template_name = UNIFORM_CARE_LETTER_FILES.get(department.strip())
+    if template_name is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported department")
+
+    candidates = []
+    if TEMPLATE_DIR_ENV:
+        candidates.append(Path(TEMPLATE_DIR_ENV) / template_name)
+    candidates.extend(
+        [
+            PROJECT_ROOT / "Document Templates" / template_name,
+            Path(__file__).resolve().parents[1] / "Document Templates" / template_name,
+            Path("/app/Document Templates") / template_name,
         ]
     )
 
@@ -739,6 +773,24 @@ def download_uniform_issue_workbook(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
     return FileResponse(path, media_type=document.content_type, filename=document.original_filename)
+
+
+@app.get("/api/employees/{employee_id}/uniform-care-letter/download")
+def download_uniform_care_letter(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    employee = _get_employee_or_404(db, employee_id)
+    template_path = _uniform_care_letter_template_path(employee.department)
+    if not template_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Uniform care letter template not found")
+
+    return FileResponse(
+        template_path,
+        media_type=UNIFORM_CARE_LETTER_MIME_TYPE,
+        filename=template_path.name,
+    )
 
 
 @app.get("/api/documents/{document_id}/download")

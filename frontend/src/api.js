@@ -157,6 +157,18 @@ export async function downloadUniformIssueWorkbook(token, employeeId, filename) 
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
 
+export async function downloadUniformCareLetter(token, employeeId, filename) {
+  const blob = await fetchFileBlob(token, `/api/employees/${employeeId}/uniform-care-letter/download`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 export async function saveUniformIssue(token, employeeId, rows) {
   const response = await fetch(`/api/employees/${employeeId}/documents/uniform_issue/save`, {
     method: "POST",

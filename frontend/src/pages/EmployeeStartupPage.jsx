@@ -4,6 +4,7 @@ import {
   deleteContractFile,
   deleteEmployeeDocument,
   downloadContractFile,
+  downloadUniformCareLetter,
   downloadUniformIssueWorkbook,
   downloadEmployeeDocument,
   fetchContractFiles,
@@ -111,6 +112,7 @@ export default function EmployeeStartupPage() {
   const { token } = useAuth();
   const fileInputRef = useRef(null);
   const [employeeName, setEmployeeName] = useState("");
+  const [employeeDepartment, setEmployeeDepartment] = useState("");
   const [checklist, setChecklist] = useState(buildDefaultChecklist);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -199,6 +201,7 @@ export default function EmployeeStartupPage() {
         }
 
         setEmployeeName(data.employee_name);
+        setEmployeeDepartment(data.department || "");
         setChecklist(loadedChecklist);
         const contractStatusRow = loadedChecklist["Contract Status"];
         setContractStatusDraft({
@@ -452,13 +455,14 @@ export default function EmployeeStartupPage() {
       return;
     }
 
-    const document = getLatestDocument(documentType);
-    if (!document) {
-      setDocumentError(`No ${DOCUMENT_LABELS[documentType].toLowerCase()} uploaded yet.`);
-      return;
-    }
+    const careLetterFilename =
+      employeeDepartment === "Forecourt"
+        ? "UNIFORM CARE LETTER-Forecourt.docx"
+        : employeeDepartment === "Car Wash"
+          ? "UNIFORM CARE LETTER-Car-Wash.docx"
+          : "UNIFORM CARE LETTER-Cashiers-Bakers.docx";
 
-    await handleDownloadDocument(documentType, document);
+    await downloadUniformCareLetter(token, employeeId, careLetterFilename);
   }
 
   async function handleContractStatusSave() {
@@ -736,7 +740,7 @@ export default function EmployeeStartupPage() {
                 className="secondary-button"
                 type="button"
                 onClick={() => handleUniformDownload("uniform_care_letter")}
-                disabled={!getLatestDocument("uniform_care_letter")}
+                disabled={!employeeDepartment}
               >
                 Download Uniform Care Letter
               </button>
