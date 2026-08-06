@@ -37,12 +37,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR_ENV = os.getenv("TEMPLATE_DIR")
 UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg"}
+ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".xls", ".xlsx"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 DOCUMENT_TYPE_LABELS = {
     "contract": "Contract",
     "passport_id_copy": "Passport / ID Copy",
     "permit_copy": "Permit Copy",
+    "bank_acc": "Bank Acc",
+    "written_warning": "Written Warning",
+    "general": "General",
     "uniform_issue": "Uniform Issue",
     "uniform_care_letter": "Uniform Care Letter",
 }
@@ -623,7 +626,7 @@ async def upload_employee_documents(
         if suffix not in ALLOWED_DOCUMENT_EXTENSIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="File must be a .pdf, .doc, .docx, .jpg, or .jpeg",
+                detail="File must be a .pdf, .doc, .docx, .jpg, .jpeg, .xls, or .xlsx",
             )
 
     created_documents: list[EmployeeDocument] = []

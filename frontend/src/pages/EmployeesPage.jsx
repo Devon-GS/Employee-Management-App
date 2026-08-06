@@ -1,14 +1,50 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { createEmployee, fetchEmployees, updateEmployee } from "../api";
+import {
+  createEmployee,
+  deleteEmployeeDocument,
+  downloadEmployeeDocument,
+  fetchEmployeeDocuments,
+  fetchEmployees,
+  updateEmployee,
+  uploadEmployeeDocuments,
+  viewEmployeeDocument,
+} from "../api";
 import Navbar from "../components/Navbar";
 
 const DEPARTMENT_OPTIONS = ["Forecourt", "Cashier", "Baker", "Car Wash"];
+const ALLOWED_FILE_TYPES = ".pdf,.doc,.docx,.jpg,.jpeg,.xls,.xlsx";
+const DOCUMENT_LABELS = {
+  bank_acc: "Bank Acc",
+  written_warning: "Written Warning",
+  general: "General",
+};
+
+function formatBytes(bytes) {
+  if (bytes === 0) {
+    return "0 B";
+  }
+
+  if (!bytes) {
+    return "";
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function EmployeesPage() {
   const navigate = useNavigate();
   const { token } = useAuth();
+  const fileInputRef = useRef(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -19,6 +55,15 @@ export default function EmployeesPage() {
   const [pageError, setPageError] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [activeDocumentEmployeeId, setActiveDocumentEmployeeId] = useState(null);
+  const [activeDocumentType, setActiveDocumentType] = useState(null);
+  const [activeDocumentTitle, setActiveDocumentTitle] = useState("");
+  const [documents, setDocuments] = useState([]);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  const [documentMessage, setDocumentMessage] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -84,6 +129,106 @@ export default function EmployeesPage() {
     if (!submitting) {
       setShowModal(false);
       setFormError("");
+    }
+  }
+
+  async function openDocumentModal(employeeId, documentType) {
+    setActiveDocumentEmployeeId(employeeId);
+    setActiveDocumentType(documentType);
+    setActiveDocumentTitle(DOCUMENT_LABELS[documentType] || "Documents");
+    setDocumentError("");
+    setDocumentMessage("");
+    setSelectedFiles([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
+    setDocumentLoading(true);
+    try {
+      const data = await fetchEmployeeDocuments(token, employeeId, documentType);
+      setDocuments(data);
+    } catch (err) {
+      setDocuments([]);
+      setDocumentError(err.message || "Unable to load uploaded files");
+    } finally {
+      setDocumentLoading(false);
+    }
+  }
+
+  function closeDocumentModal() {
+    if (!documentUploading) {
+      setActiveDocumentEmployeeId(null);
+      setActiveDocumentType(null);
+      setActiveDocumentTitle("");
+      setDocuments([]);
+      setDocumentError("");
+      setDocumentMessage("");
+      setSelectedFiles([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  }
+
+  async function handleDocumentUpload() {
+    if (!activeDocumentType) {
+      return;
+    }
+
+    if (!selectedFiles.length) {
+      setDocumentError("Please choose at least one file.");
+      return;
+    }
+
+    setDocumentUploading(true);
+    setDocumentError("");
+    setDocumentMessage("");
+
+    try {
+      await uploadEmployeeDocuments(token, activeDocumentEmployeeId, activeDocumentType, selectedFiles);
+      const refreshed = await fetchEmployeeDocuments(token, activeDocumentEmployeeId, activeDocumentType);
+      setDocuments(refreshed);
+      setDocumentMessage("Files uploaded successfully.");
+      setSelectedFiles([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (err) {
+      setDocumentError(err.message || "Unable to upload files");
+    } finally {
+      setDocumentUploading(false);
+    }
+  }
+
+  async function handleViewDocument(documentId) {
+    try {
+      await viewEmployeeDocument(token, documentId);
+    } catch (err) {
+      setDocumentError(err.message || "Unable to view file");
+    }
+  }
+
+  async function handleDownloadDocument(document) {
+    try {
+      await downloadEmployeeDocument(token, document.id, document.original_filename);
+    } catch (err) {
+      setDocumentError(err.message || "Unable to download file");
+    }
+  }
+
+  async function handleDeleteDocument(documentId) {
+    const confirmed = window.confirm("Delete this uploaded file?");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteEmployeeDocument(token, documentId);
+      const refreshed = await fetchEmployeeDocuments(token, activeDocumentEmployeeId, activeDocumentType);
+      setDocuments(refreshed);
+      setDocumentMessage("File deleted successfully.");
+    } catch (err) {
+      setDocumentError(err.message || "Unable to delete file");
     }
   }
 
@@ -167,12 +312,27 @@ export default function EmployeesPage() {
                           Startup
                         </button>
                         <button className="secondary-button" type="button">
+                          View
+                        </button>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => openDocumentModal(employee.id, "bank_acc")}
+                        >
                           Bank Acc
                         </button>
-                        <button className="secondary-button" type="button">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => openDocumentModal(employee.id, "written_warning")}
+                        >
                           Written Warning
                         </button>
-                        <button className="secondary-button" type="button">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => openDocumentModal(employee.id, "general")}
+                        >
                           General
                         </button>
                         <button className="secondary-button" type="button">
@@ -198,6 +358,67 @@ export default function EmployeesPage() {
           )}
         </div>
       </section>
+
+      {activeDocumentType ? (
+        <div className="modal-backdrop" onClick={closeDocumentModal}>
+          <div className="modal-card contract-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{activeDocumentTitle}</h2>
+              <button className="icon-button" type="button" onClick={closeDocumentModal}>
+                ×
+              </button>
+            </div>
+
+            <div className="contract-upload-area">
+              <label className="file-picker">
+                <span>Choose file(s)</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ALLOWED_FILE_TYPES}
+                  multiple
+                  onChange={(event) => setSelectedFiles(Array.from(event.target.files || []))}
+                />
+              </label>
+
+              <button className="primary-button" type="button" onClick={handleDocumentUpload} disabled={documentUploading}>
+                {documentUploading ? "Uploading..." : "Upload"}
+              </button>
+            </div>
+
+            {documentError ? <div className="error-banner">{documentError}</div> : null}
+            {documentMessage ? <div className="success-banner">{documentMessage}</div> : null}
+
+            <div className="contract-file-list">
+              {documentLoading ? (
+                <div className="table-state">Loading uploaded files...</div>
+              ) : documents.length === 0 ? (
+                <div className="table-state">No uploaded files yet.</div>
+              ) : (
+                documents.map((document) => (
+                  <div key={document.id} className="contract-file-row">
+                    <div className="contract-file-meta">
+                      <strong>{document.original_filename}</strong>
+                      <span>{formatBytes(document.size_bytes)}</span>
+                    </div>
+                    <div className="table-actions">
+                      <button className="secondary-button" type="button" onClick={() => handleViewDocument(document.id)}>
+                        View
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => handleDownloadDocument(document)}>
+                        Download
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => handleDeleteDocument(document.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showModal ? (
         <div className="modal-backdrop" onClick={closeModal}>
