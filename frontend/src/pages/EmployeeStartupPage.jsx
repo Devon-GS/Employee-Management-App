@@ -37,7 +37,7 @@ const DOCUMENT_ROWS = [
   { label: "Staff Instructions / Training Pack / Job Description", isStatus: false },
 ];
 
-const CONTRACT_STATUS_OPTIONS = ["Seasonal/Temporary", "Permanent"];
+const CONTRACT_STATUS_OPTIONS = ["Permanent", "Temporary"];
 const ALLOWED_FILE_TYPES = ".pdf,.doc,.docx,.jpg,.jpeg";
 const DOCUMENT_LABELS = {
   contract: "Contract",
@@ -65,6 +65,7 @@ function buildDefaultChecklist() {
         status: "",
         info: "",
         on_system: false,
+        entries: [],
       };
     }
     return accumulator;
@@ -93,6 +94,7 @@ function getContractStatusRow(checklist) {
     status: "",
     info: "",
     on_system: false,
+    entries: [],
   };
 }
 
@@ -135,9 +137,38 @@ export default function EmployeeStartupPage() {
     date: "",
     on_system: false,
   });
-  const [contractStatusSaving, setContractStatusSaving] = useState(false);
   const [contractStatusError, setContractStatusError] = useState("");
   const [uniformActionsModalOpen, setUniformActionsModalOpen] = useState(false);
+  const [contractStatusEntries, setContractStatusEntries] = useState([]);
+
+  function buildContractStatusRow(entries, fallbackRow = {}) {
+    const nextEntries = Array.isArray(entries) ? entries : [];
+    const latestEntry = nextEntries[nextEntries.length - 1] || null;
+
+    if (!latestEntry) {
+      return {
+        ...fallbackRow,
+        done: false,
+        na: false,
+        date: "",
+        status: "",
+        info: "",
+        on_system: false,
+        entries: [],
+      };
+    }
+
+    return {
+      ...fallbackRow,
+      done: true,
+      na: false,
+      date: latestEntry.date || "",
+      status: latestEntry.status || "",
+      info: latestEntry.status || "",
+      on_system: Boolean(latestEntry.on_system),
+      entries: nextEntries,
+    };
+  }
 
   async function loadDocumentsForType(documentType) {
     if (documentType === "contract") {
@@ -197,6 +228,7 @@ export default function EmployeeStartupPage() {
             status: itemState.status || "",
             info: itemState.info || "",
             on_system: Boolean(itemState.on_system),
+            entries: Array.isArray(itemState.entries) ? itemState.entries : [],
           };
         }
 
@@ -338,6 +370,7 @@ export default function EmployeeStartupPage() {
       date: row.date || "",
       on_system: Boolean(row.on_system),
     });
+    setContractStatusEntries(Array.isArray(row.entries) ? row.entries : []);
     setContractStatusError("");
     setContractStatusModalOpen(true);
   }
@@ -347,7 +380,34 @@ export default function EmployeeStartupPage() {
       ...current,
       date,
     }));
-    updateRow("Contract Status", { date });
+  }
+
+  function handleContractStatusAdd() {
+    if (!contractStatusDraft.status || !contractStatusDraft.date) {
+      setContractStatusError("Please choose a status and date.");
+      return;
+    }
+
+    const entry = {
+      status: contractStatusDraft.status,
+      date: contractStatusDraft.date,
+      on_system: contractStatusDraft.on_system,
+    };
+
+    setContractStatusError("");
+    setContractStatusEntries((current) => {
+      const nextEntries = [...current, entry];
+      updateRow("Contract Status", buildContractStatusRow(nextEntries, checklist["Contract Status"]));
+      return nextEntries;
+    });
+  }
+
+  function handleContractStatusDelete(entryIndex) {
+    setContractStatusEntries((current) => {
+      const nextEntries = current.filter((_, index) => index !== entryIndex);
+      updateRow("Contract Status", buildContractStatusRow(nextEntries, checklist["Contract Status"]));
+      return nextEntries;
+    });
   }
 
   function handlePermitStatusDateChange(date) {
@@ -359,10 +419,8 @@ export default function EmployeeStartupPage() {
   }
 
   function closeContractStatusModal() {
-    if (!contractStatusSaving) {
-      setContractStatusModalOpen(false);
-      setContractStatusError("");
-    }
+    setContractStatusModalOpen(false);
+    setContractStatusError("");
   }
 
   async function handleDocumentUpload() {
@@ -463,62 +521,6 @@ export default function EmployeeStartupPage() {
           : "UNIFORM CARE LETTER-Cashiers-Bakers.docx";
 
     await downloadUniformCareLetter(token, employeeId, careLetterFilename);
-  }
-
-  async function handleContractStatusSave() {
-    setContractStatusSaving(true);
-    setContractStatusError("");
-    setMessage("");
-
-    const isPermanent = contractStatusDraft.status === "Permanent";
-    const nextStatusDate = contractStatusDraft.date;
-    const nextChecklist = {
-      ...checklist,
-      Contract: {
-        ...checklist.Contract,
-        done: true,
-        na: false,
-      },
-      "Contract Status": {
-        ...checklist["Contract Status"],
-        done: true,
-        na: false,
-        date: nextStatusDate,
-        status: contractStatusDraft.status,
-        info: contractStatusDraft.status,
-        on_system: contractStatusDraft.on_system,
-      },
-      Start: {
-        ...checklist.Start,
-        date: contractStatusDraft.on_system ? nextStatusDate : "",
-        done: contractStatusDraft.on_system ? true : false,
-        na: contractStatusDraft.on_system ? false : checklist.Start.na,
-      },
-      UIF: {
-        ...checklist.UIF,
-        date: isPermanent ? nextStatusDate : "",
-        done: isPermanent ? true : false,
-        na: false,
-      },
-      "MIBCO reg": {
-        ...checklist["MIBCO reg"],
-        date: isPermanent ? nextStatusDate : "",
-        done: isPermanent ? true : false,
-        na: false,
-      },
-    };
-
-    try {
-      await saveEmployeeStartup(token, employeeId, nextChecklist);
-      setChecklist(nextChecklist);
-      setIsDirty(false);
-      setMessage("Contract status saved successfully.");
-      setContractStatusModalOpen(false);
-    } catch (err) {
-      setContractStatusError(err.message || "Unable to save contract status");
-    } finally {
-      setContractStatusSaving(false);
-    }
   }
 
   const contractStatusRow = getContractStatusRow(checklist);
@@ -765,15 +767,9 @@ export default function EmployeeStartupPage() {
               </button>
             </div>
 
-            <div className="contract-status-summary">
-              <div className="table-state">
-                Current status: <strong>{contractStatusDraft.status || "Not set"}</strong>
-              </div>
-            </div>
-
-            <div className="modal-form">
-              <label>
-                Contract status
+            <div className="contract-status-form">
+              <label className="contract-status-select-row">
+                <span>Current Status</span>
                 <select
                   value={contractStatusDraft.status}
                   onChange={(event) =>
@@ -792,19 +788,46 @@ export default function EmployeeStartupPage() {
                 </select>
               </label>
 
-              <label>
-                Date
-                <input
-                  type="date"
-                  value={contractStatusDraft.date}
-                  onChange={(event) =>
-                    setContractStatusDraft((current) => ({
-                      ...current,
-                      date: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+              <div className="contract-status-add-row">
+                <label>
+                  Contract Status
+                  <input
+                    type="date"
+                    value={contractStatusDraft.date}
+                    onChange={(event) =>
+                      setContractStatusDraft((current) => ({
+                        ...current,
+                        date: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <button className="primary-button" type="button" onClick={handleContractStatusAdd}>
+                  Add
+                </button>
+              </div>
+
+              <div className="contract-status-history">
+                {contractStatusEntries.length === 0 ? (
+                  <div className="table-state">Saved contract status entries will appear here.</div>
+                ) : (
+                  contractStatusEntries.map((entry, index) => (
+                    <div key={`${entry.status}-${entry.date}-${index}`} className="contract-status-history-item">
+                      <div className="contract-status-history-info">
+                        <strong>{entry.status}</strong>
+                        <span>{entry.date}</span>
+                      </div>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => handleContractStatusDelete(index)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
 
               <label className="checkbox-label">
                 <input
@@ -821,20 +844,6 @@ export default function EmployeeStartupPage() {
               </label>
 
               {contractStatusError ? <div className="error-banner">{contractStatusError}</div> : null}
-
-              <div className="form-actions">
-                <button className="secondary-button" type="button" onClick={closeContractStatusModal}>
-                  Cancel
-                </button>
-                <button
-                  className="primary-button"
-                  type="button"
-                  onClick={handleContractStatusSave}
-                  disabled={contractStatusSaving}
-                >
-                  {contractStatusSaving ? "Saving..." : "Save"}
-                </button>
-              </div>
             </div>
           </div>
         </div>
