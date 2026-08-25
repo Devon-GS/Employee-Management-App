@@ -139,6 +139,7 @@ export default function EmployeeStartupPage() {
   });
   const [contractStatusError, setContractStatusError] = useState("");
   const [uniformActionsModalOpen, setUniformActionsModalOpen] = useState(false);
+  const [uniformEditorChoiceOpen, setUniformEditorChoiceOpen] = useState(false);
   const [contractStatusEntries, setContractStatusEntries] = useState([]);
 
   function buildContractStatusRow(entries, fallbackRow = {}) {
@@ -353,9 +354,18 @@ export default function EmployeeStartupPage() {
 
   function openUniformEditorModal() {
     setUniformActionsModalOpen(false);
+    setUniformEditorChoiceOpen(true);
     setDocumentError("");
     setDocumentMessage("");
-    navigate(`/employees/${employeeId}/edit-uniform`);
+  }
+
+  function closeUniformEditorChoiceModal() {
+    setUniformEditorChoiceOpen(false);
+  }
+
+  function startUniformEditor(mode) {
+    setUniformEditorChoiceOpen(false);
+    navigate(`/employees/${employeeId}/edit-uniform?mode=${mode}`);
   }
 
   function openUniformUploadModal() {
@@ -774,6 +784,35 @@ export default function EmployeeStartupPage() {
 
             {documentError ? <div className="error-banner">{documentError}</div> : null}
             {documentMessage ? <div className="success-banner">{documentMessage}</div> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {uniformEditorChoiceOpen ? (
+        <div className="modal-backdrop" onClick={closeUniformEditorChoiceModal}>
+          <div className="modal-card uniform-editor-choice-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Uniform Issue</h2>
+              <button className="icon-button" type="button" onClick={closeUniformEditorChoiceModal}>
+                ×
+              </button>
+            </div>
+
+            <p className="subtitle">Choose whether to edit the saved form or start a new one.</p>
+
+            <div className="uniform-actions-grid">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => startUniformEditor("edit")}
+                disabled={!uniformIssueWorkbookAvailable}
+              >
+                Edit Existing
+              </button>
+              <button className="secondary-button" type="button" onClick={() => startUniformEditor("new")}>
+                Start New
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { fetchEmployee, fetchUniformIssue, saveUniformIssue } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
@@ -44,7 +44,9 @@ function buildUniformRowsFromData(data) {
 export default function EditUniformPage() {
   const navigate = useNavigate();
   const { employeeId } = useParams();
+  const [searchParams] = useSearchParams();
   const { token } = useAuth();
+  const mode = searchParams.get("mode");
   const [employeeName, setEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
@@ -56,12 +58,15 @@ export default function EditUniformPage() {
 
     async function loadEmployee() {
       try {
-        const [employee, savedUniformIssue] = await Promise.all([
-          fetchEmployee(token, employeeId),
-          fetchUniformIssue(token, employeeId),
-        ]);
+        const employee = await fetchEmployee(token, employeeId);
         if (mounted) {
-          setEmployeeName(savedUniformIssue?.employee_name || employee.name);
+          setEmployeeName(employee.name);
+          if (mode === "new") {
+            setRows([]);
+            return;
+          }
+
+          const savedUniformIssue = await fetchUniformIssue(token, employeeId);
           setRows(savedUniformIssue ? buildUniformRowsFromData(savedUniformIssue) : []);
         }
       } catch (err) {
@@ -80,7 +85,7 @@ export default function EditUniformPage() {
     return () => {
       mounted = false;
     };
-  }, [employeeId, token]);
+  }, [employeeId, mode, token]);
 
   function updateRow(index, field, value) {
     setRows((current) =>
