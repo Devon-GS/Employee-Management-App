@@ -400,6 +400,27 @@ export default function EmployeeStartupPage() {
       updateRow("Contract Status", buildContractStatusRow(nextEntries, checklist["Contract Status"]));
       return nextEntries;
     });
+
+    if (contractStatusDraft.status === "Permanent") {
+      updateRow("UIF", {
+        done: true,
+        na: false,
+        date: contractStatusDraft.date,
+      });
+      updateRow("MIBCO reg", {
+        done: true,
+        na: false,
+        date: contractStatusDraft.date,
+      });
+    }
+
+    if (contractStatusDraft.on_system) {
+      updateRow("Start", {
+        done: true,
+        na: false,
+        date: contractStatusDraft.date,
+      });
+    }
   }
 
   function handleContractStatusDelete(entryIndex) {
