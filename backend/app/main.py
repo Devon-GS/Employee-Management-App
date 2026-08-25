@@ -49,6 +49,18 @@ UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.w
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".xls", ".xlsx"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 ALLOWED_MEDICAL_CERT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"}
+UNIFORM_ISSUE_MAX_ROWS = 10
+UNIFORM_ISSUE_DESCRIPTION_OPTIONS = [
+    "NAME TAG",
+    "FUEL PUMP TAG",
+    "SHIRT",
+    "TROUSERS",
+    "JACKET- LIGHT WEIGHT",
+    "JACKET- PADDED(extra item)",
+    "CAP",
+    "BEANIE",
+    "SAFTY SHOES",
+]
 DOCUMENT_TYPE_LABELS = {
     "contract": "Contract",
     "passport_id_copy": "Passport / ID Copy",
@@ -65,7 +77,7 @@ UNIFORM_ISSUE_ROW_MAP = {
     "SHIRT": 9,
     "TROUSERS": 10,
     "JACKET- LIGHT WEIGHT": 11,
-    "JACKET- PADDED (extra item)": 12,
+    "JACKET- PADDED(extra item)": 12,
     "CAP": 13,
     "BEANIE": 14,
     "SAFTY SHOES": 15,
@@ -412,32 +424,34 @@ def _cell_text(value: str | None) -> str | None:
     return text if text else None
 
 
-def _empty_uniform_issue_rows() -> dict[str, dict[str, str]]:
+def _empty_uniform_issue_row() -> dict[str, str]:
     return {
-        description: {
-            "size": "",
-            "quantity": "",
-            "condition": "",
-            "details": "",
-            "returns": "",
-            "cost": "",
-        }
-        for description in UNIFORM_ISSUE_ROW_MAP
+        "description": "",
+        "size": "",
+        "quantity": "",
+        "condition": "",
+        "details": "",
+        "returns": "",
+        "cost": "",
     }
+
+
+def _empty_uniform_issue_rows() -> list[dict[str, str]]:
+    return [_empty_uniform_issue_row() for _ in range(UNIFORM_ISSUE_MAX_ROWS)]
 
 
 def _uniform_issue_documents_query(db: Session, employee_id: int) -> list[EmployeeDocument]:
     return list(
         db.scalars(
-        select(EmployeeDocument)
-        .where(EmployeeDocument.employee_id == employee_id, EmployeeDocument.document_type == "uniform_issue")
-        .order_by(EmployeeDocument.id.desc())
+            select(EmployeeDocument)
+            .where(EmployeeDocument.employee_id == employee_id, EmployeeDocument.document_type == "uniform_issue")
+            .order_by(EmployeeDocument.id.desc())
         ).all()
     )
 
 
 def _latest_uniform_issue_document(db: Session, employee_id: int) -> EmployeeDocument | None:
-    documents = _uniform_issue_documents_query(db, employee_id)
+    documents = _hidden_uniform_issue_documents_query(db, employee_id)
     return documents[0] if documents else None
 
 
@@ -445,19 +459,27 @@ def _uniform_issue_document_path(document: EmployeeDocument) -> Path:
     return _document_path(document.stored_filename)
 
 
-def _uniform_issue_rows_from_workbook(workbook) -> dict[str, dict[str, str]]:
+def _uniform_issue_rows_from_workbook(workbook) -> list[dict[str, str]]:
     worksheet = workbook["Uniform"] if "Uniform" in workbook.sheetnames else workbook.active
-    rows = _empty_uniform_issue_rows()
+    rows: list[dict[str, str]] = []
 
-    for row_number, description in UNIFORM_ISSUE_ROW_MAP_BY_ROW.items():
-        rows[description] = {
+    for row_number in range(7, 7 + UNIFORM_ISSUE_MAX_ROWS):
+        description = _cell_text(worksheet[f"A{row_number}"].value) or ""
+        if not description and all(
+            _cell_text(worksheet[f"{column}{row_number}"].value) is None
+            for column in ["B", "C", "D", "E", "G", "H"]
+        ):
+            continue
+
+        rows.append({
+            "description": description,
             "size": _cell_text(worksheet[f"B{row_number}"].value) or "",
             "quantity": _cell_text(worksheet[f"C{row_number}"].value) or "",
             "condition": _cell_text(worksheet[f"D{row_number}"].value) or "",
             "details": _cell_text(worksheet[f"E{row_number}"].value) or "",
             "returns": _cell_text(worksheet[f"G{row_number}"].value) or "",
             "cost": _cell_text(worksheet[f"H{row_number}"].value) or "",
-        }
+        })
 
     return rows
 
@@ -466,6 +488,14 @@ def _is_hidden_uniform_issue_workbook(document: EmployeeDocument) -> bool:
     return document.document_type == "uniform_issue" and (
         document.stored_filename.startswith("uniform_issue_") or document.original_filename.startswith("ISSUE-Uniforms - ")
     )
+
+
+def _hidden_uniform_issue_documents_query(db: Session, employee_id: int) -> list[EmployeeDocument]:
+    return [
+        document
+        for document in _uniform_issue_documents_query(db, employee_id)
+        if _is_hidden_uniform_issue_workbook(document)
+    ]
 
 
 def calculate_annual_leave_balance(employee_id: int) -> tuple[float, float]:
@@ -806,6 +836,38 @@ def save_uniform_issue_document(
     db: Session = Depends(get_db),
 ) -> EmployeeDocumentResponse:
     employee = _get_employee_or_404(db, employee_id)
+    cleaned_rows: list[dict[str, str]] = []
+    for row in payload.rows:
+        description = (row.description or "").strip()
+        size = (row.size or "").strip()
+        quantity = (row.quantity or "").strip()
+        condition = (row.condition or "").strip()
+        details = (row.details or "").strip()
+        returns = (row.returns or "").strip()
+        cost = (row.cost or "").strip()
+
+        if not any([description, size, quantity, condition, details, returns, cost]):
+            continue
+
+        if not description:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Each row must have a description")
+        if description not in UNIFORM_ISSUE_DESCRIPTION_OPTIONS:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid uniform description")
+
+        cleaned_rows.append(
+            {
+                "description": description,
+                "size": size,
+                "quantity": quantity,
+                "condition": condition,
+                "details": details,
+                "returns": returns,
+                "cost": cost,
+            }
+        )
+
+    if len(cleaned_rows) > UNIFORM_ISSUE_MAX_ROWS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You can only save up to 10 rows")
 
     template_path = _uniform_issue_template_path()
     if not template_path.exists():
@@ -816,17 +878,19 @@ def save_uniform_issue_document(
 
     worksheet["A4"] = employee.name
 
-    for description, row_number in UNIFORM_ISSUE_ROW_MAP.items():
-        row_data = payload.rows.get(description)
-        if row_data is None:
-            continue
+    for row_number in range(7, 7 + UNIFORM_ISSUE_MAX_ROWS):
+        for column in ["A", "B", "C", "D", "E", "G", "H"]:
+            worksheet[f"{column}{row_number}"] = None
 
-        worksheet[f"B{row_number}"] = _cell_text(row_data.size)
-        worksheet[f"C{row_number}"] = _cell_text(row_data.quantity)
-        worksheet[f"D{row_number}"] = _cell_text(row_data.condition)
-        worksheet[f"E{row_number}"] = _cell_text(row_data.details)
-        worksheet[f"G{row_number}"] = _cell_text(row_data.returns)
-        worksheet[f"H{row_number}"] = _cell_text(row_data.cost)
+    for index, row_data in enumerate(cleaned_rows):
+        row_number = 7 + index
+        worksheet[f"A{row_number}"] = row_data["description"]
+        worksheet[f"B{row_number}"] = row_data["size"]
+        worksheet[f"C{row_number}"] = row_data["quantity"]
+        worksheet[f"D{row_number}"] = row_data["condition"]
+        worksheet[f"E{row_number}"] = row_data["details"]
+        worksheet[f"G{row_number}"] = row_data["returns"]
+        worksheet[f"H{row_number}"] = row_data["cost"]
 
     safe_employee_name = _sanitize_filename_part(employee.name)
     original_filename = f"ISSUE-Uniforms - {safe_employee_name}.xlsx"
@@ -836,7 +900,7 @@ def save_uniform_issue_document(
 
     workbook.save(temp_output_path)
 
-    existing_documents = _uniform_issue_documents_query(db, employee_id)
+    existing_documents = _hidden_uniform_issue_documents_query(db, employee_id)
     if existing_documents:
         existing_paths = [_uniform_issue_document_path(document) for document in existing_documents]
         for existing_document in existing_documents:

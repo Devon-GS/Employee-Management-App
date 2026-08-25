@@ -908,6 +908,23 @@ input {
   resize: vertical;
 }
 
+.row-remove-button {
+  margin-top: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.row-remove-button:hover {
+  color: var(--primary-hover);
+}
+
 .uniform-name-line {
   display: flex;
   align-items: baseline;

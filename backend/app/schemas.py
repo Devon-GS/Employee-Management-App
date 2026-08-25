@@ -55,6 +55,7 @@ class StartupChecklistRequest(BaseModel):
 
 
 class UniformIssueRowRequest(BaseModel):
+    description: str = ""
     size: str = ""
     quantity: str = ""
     condition: str = ""
@@ -64,12 +65,12 @@ class UniformIssueRowRequest(BaseModel):
 
 
 class UniformIssueSaveRequest(BaseModel):
-    rows: dict[str, UniformIssueRowRequest]
+    rows: list[UniformIssueRowRequest]
 
 
 class UniformIssueWorkbookResponse(BaseModel):
     employee_name: str
-    rows: dict[str, UniformIssueRowRequest]
+    rows: list[UniformIssueRowRequest]
 
 
 class ContractFileResponse(BaseModel):

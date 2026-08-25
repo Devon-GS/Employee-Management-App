@@ -3,46 +3,42 @@ import { useNavigate, useParams } from "react-router-dom";
 import { fetchEmployee, fetchUniformIssue, saveUniformIssue } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
-const UNIFORM_ROWS = [
+const UNIFORM_DESCRIPTION_OPTIONS = [
   "NAME TAG",
   "FUEL PUMP TAG",
   "SHIRT",
   "TROUSERS",
   "JACKET- LIGHT WEIGHT",
-  "JACKET- PADDED (extra item)",
+  "JACKET- PADDED(extra item)",
   "CAP",
   "BEANIE",
   "SAFTY SHOES",
 ];
 
 const CONDITION_OPTIONS = ["NEW", "GOOD", "MEDIUM", "FAIR"];
+const MAX_ROWS = 10;
 
-function buildUniformRows() {
-  return UNIFORM_ROWS.reduce((accumulator, label) => {
-    accumulator[label] = {
-      size: "",
-      quantity: "",
-      condition: "",
-      details: "",
-      returns: "",
-      cost: "",
-    };
-    return accumulator;
-  }, {});
+function createEmptyUniformRow() {
+  return {
+    description: "",
+    size: "",
+    quantity: "",
+    condition: "",
+    details: "",
+    returns: "",
+    cost: "",
+  };
 }
 
 function buildUniformRowsFromData(data) {
-  const rows = buildUniformRows();
-  const sourceRows = data?.rows || {};
-
-  for (const label of UNIFORM_ROWS) {
-    rows[label] = {
-      ...rows[label],
-      ...(sourceRows[label] || {}),
-    };
+  if (!data?.rows || !Array.isArray(data.rows)) {
+    return [];
   }
 
-  return rows;
+  return data.rows.slice(0, MAX_ROWS).map((row) => ({
+    ...createEmptyUniformRow(),
+    ...row,
+  }));
 }
 
 export default function EditUniformPage() {
@@ -51,9 +47,8 @@ export default function EditUniformPage() {
   const { token } = useAuth();
   const [employeeName, setEmployeeName] = useState("");
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState(buildUniformRows);
+  const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -67,9 +62,7 @@ export default function EditUniformPage() {
         ]);
         if (mounted) {
           setEmployeeName(savedUniformIssue?.employee_name || employee.name);
-          if (savedUniformIssue) {
-            setRows(buildUniformRowsFromData(savedUniformIssue));
-          }
+          setRows(savedUniformIssue ? buildUniformRowsFromData(savedUniformIssue) : []);
         }
       } catch (err) {
         if (mounted) {
@@ -89,24 +82,33 @@ export default function EditUniformPage() {
     };
   }, [employeeId, token]);
 
-  function updateRow(label, field, value) {
-    setRows((current) => ({
-      ...current,
-      [label]: {
-        ...current[label],
-        [field]: value,
-      },
-    }));
+  function updateRow(index, field, value) {
+    setRows((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item
+      )
+    );
+  }
+
+  function addRow() {
+    setRows((current) => (current.length >= MAX_ROWS ? current : [...current, createEmptyUniformRow()]));
+  }
+
+  function removeRow(index) {
+    setRows((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
   async function handleSave() {
     setSaving(true);
     setError("");
-    setMessage("");
 
     try {
       await saveUniformIssue(token, employeeId, rows);
-      setMessage("Uniform issue saved successfully.");
       navigate(`/employees/${employeeId}/startup`, { replace: true });
     } catch (err) {
       setError(err.message || "Unable to save uniform issue");
@@ -128,7 +130,6 @@ export default function EditUniformPage() {
         </div>
 
         {error ? <div className="error-banner">{error}</div> : null}
-        {message ? <div className="success-banner">{message}</div> : null}
 
         <div className="table-wrap">
           <table className="uniform-edit-table">
@@ -144,17 +145,34 @@ export default function EditUniformPage() {
               </tr>
             </thead>
             <tbody>
-              {UNIFORM_ROWS.map((label) => {
-                const row = rows[label];
-
+              {rows.map((row, index) => {
                 return (
-                  <tr key={label}>
-                    <td>{label}</td>
+                  <tr key={`${row.description || "row"}-${index}`}>
+                    <td>
+                      <select
+                        value={row.description}
+                        onChange={(event) => updateRow(index, "description", event.target.value)}
+                      >
+                        <option value="">Select</option>
+                        {UNIFORM_DESCRIPTION_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="row-remove-button"
+                        type="button"
+                        onClick={() => removeRow(index)}
+                      >
+                        Remove Row
+                      </button>
+                    </td>
                     <td>
                       <input
                         type="text"
                         value={row.size}
-                        onChange={(event) => updateRow(label, "size", event.target.value)}
+                        onChange={(event) => updateRow(index, "size", event.target.value)}
                       />
                     </td>
                     <td>
@@ -162,13 +180,13 @@ export default function EditUniformPage() {
                         type="number"
                         min="0"
                         value={row.quantity}
-                        onChange={(event) => updateRow(label, "quantity", event.target.value)}
+                        onChange={(event) => updateRow(index, "quantity", event.target.value)}
                       />
                     </td>
                     <td>
                       <select
                         value={row.condition}
-                        onChange={(event) => updateRow(label, "condition", event.target.value)}
+                        onChange={(event) => updateRow(index, "condition", event.target.value)}
                       >
                         <option value="">Select</option>
                         {CONDITION_OPTIONS.map((option) => (
@@ -182,21 +200,21 @@ export default function EditUniformPage() {
                       <textarea
                         rows="3"
                         value={row.details}
-                        onChange={(event) => updateRow(label, "details", event.target.value)}
+                        onChange={(event) => updateRow(index, "details", event.target.value)}
                       />
                     </td>
                     <td>
                       <textarea
                         rows="3"
                         value={row.returns}
-                        onChange={(event) => updateRow(label, "returns", event.target.value)}
+                        onChange={(event) => updateRow(index, "returns", event.target.value)}
                       />
                     </td>
                     <td>
                       <input
                         type="text"
                         value={row.cost}
-                        onChange={(event) => updateRow(label, "cost", event.target.value)}
+                        onChange={(event) => updateRow(index, "cost", event.target.value)}
                       />
                     </td>
                   </tr>
@@ -207,6 +225,9 @@ export default function EditUniformPage() {
         </div>
 
         <div className="startup-actions">
+          <button className="secondary-button" type="button" onClick={addRow} disabled={rows.length >= MAX_ROWS}>
+            Add Row
+          </button>
           <button className="primary-button" type="button" onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
           </button>
