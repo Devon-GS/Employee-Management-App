@@ -29,7 +29,6 @@ class EmployeeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
-    hire_date: date
 
 
 class EmployeeResponse(BaseModel):
@@ -39,7 +38,6 @@ class EmployeeResponse(BaseModel):
     name: str
     department: str | None = None
     passport_id: str
-    hire_date: date
     startup_data: dict = Field(default_factory=dict)
 
 
@@ -47,7 +45,6 @@ class EmployeeUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
-    hire_date: date
 
 
 class StartupChecklistRequest(BaseModel):
@@ -163,7 +160,7 @@ class EmployeeLeaveSummaryResponse(BaseModel):
     id: int
     name: str
     passport_id: str
-    hire_date: date
+    permanent_contract_start_date: date | None = None
     annual_leave_entitlement: float
     annual_leave_balance: float
     sick_leave_entitlement: float

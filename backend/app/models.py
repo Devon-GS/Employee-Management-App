@@ -23,7 +23,6 @@ class Employee(Base):
     name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     department: Mapped[str | None] = mapped_column(String(50), nullable=True)
     passport_id: Mapped[str] = mapped_column(String(120), nullable=False)
-    hire_date: Mapped[date] = mapped_column(Date, nullable=False)
     startup_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
 

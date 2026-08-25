@@ -52,7 +52,6 @@ export default function EmployeesPage() {
   const [name, setName] = useState("");
   const [department, setDepartment] = useState("");
   const [passportId, setPassportId] = useState("");
-  const [hireDate, setHireDate] = useState("");
   const [pageError, setPageError] = useState("");
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -113,7 +112,6 @@ export default function EmployeesPage() {
     setName(employee?.name ?? "");
     setDepartment(employee?.department ?? "");
     setPassportId(employee?.passport_id ?? "");
-    setHireDate(employee?.hire_date ?? new Date().toISOString().slice(0, 10));
     setFormError("");
   }
 
@@ -247,8 +245,8 @@ export default function EmployeesPage() {
 
     try {
       const savedEmployee = editingEmployeeId
-        ? await updateEmployee(token, editingEmployeeId, name, department, passportId, hireDate)
-        : await createEmployee(token, name, department, passportId, hireDate);
+        ? await updateEmployee(token, editingEmployeeId, name, department, passportId)
+        : await createEmployee(token, name, department, passportId);
 
       setEmployees((current) => {
         const nextEmployees = editingEmployeeId
@@ -295,7 +293,6 @@ export default function EmployeesPage() {
                   <th>Employee name</th>
                   <th>Department</th>
                   <th>Passport/ID</th>
-                  <th>Hire date</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -305,7 +302,6 @@ export default function EmployeesPage() {
                     <td>{employee.name}</td>
                     <td>{employee.department || "-"}</td>
                     <td>{employee.passport_id}</td>
-                    <td>{employee.hire_date || "-"}</td>
                     <td>
                       <div className="table-actions">
                         <button
@@ -458,15 +454,6 @@ export default function EmployeesPage() {
                 <input
                   value={passportId}
                   onChange={(event) => setPassportId(event.target.value)}
-                />
-              </label>
-              <label>
-                Hire date
-                <input
-                  type="date"
-                  value={hireDate}
-                  onChange={(event) => setHireDate(event.target.value)}
-                  required
                 />
               </label>
               {formError ? <div className="error-banner">{formError}</div> : null}

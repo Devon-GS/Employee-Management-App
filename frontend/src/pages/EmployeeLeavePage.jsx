@@ -6,6 +6,7 @@ import {
   deleteSickLeave,
   fetchAnnualLeave,
   fetchEmployees,
+  fetchEmployeeLeaveReport,
   fetchSickLeave,
   updateAnnualLeave,
   updateSickLeave,
@@ -49,6 +50,7 @@ export default function EmployeeLeavePage() {
   const { token } = useAuth();
   const [activeSection, setActiveSection] = useState("annual");
   const [employees, setEmployees] = useState([]);
+  const [reportEmployees, setReportEmployees] = useState([]);
   const [annualLeave, setAnnualLeave] = useState([]);
   const [sickLeave, setSickLeave] = useState([]);
   const [selectedReportEmployeeId, setSelectedReportEmployeeId] = useState("");
@@ -74,9 +76,11 @@ export default function EmployeeLeavePage() {
         fetchAnnualLeave(token),
         fetchSickLeave(token),
       ]);
+      const reportData = await fetchEmployeeLeaveReport(token);
       setEmployees(employeeData);
       setAnnualLeave(annualData);
       setSickLeave(sickData);
+      setReportEmployees(reportData.employees || []);
       setSelectedReportEmployeeId((current) => current || employeeData[0]?.id?.toString() || "");
     } catch (err) {
       setError(err.message || "Unable to load leave data");
@@ -209,7 +213,8 @@ export default function EmployeeLeavePage() {
     }
   }
 
-  const reportEmployee = employees.find((employee) => employee.id === Number(selectedReportEmployeeId)) || null;
+  const reportEmployee =
+    reportEmployees.find((employee) => employee.id === Number(selectedReportEmployeeId)) || null;
   const reportAnnualRecords = annualLeave.filter(
     (leave) => leave.employee_id === Number(selectedReportEmployeeId),
   );
@@ -382,7 +387,7 @@ export default function EmployeeLeavePage() {
                 Select employee
                 <select value={selectedReportEmployeeId} onChange={(event) => setSelectedReportEmployeeId(event.target.value)}>
                   <option value="">Choose an employee</option>
-                  {employees.map((employee) => (
+                  {reportEmployees.map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name}
                     </option>
@@ -400,7 +405,8 @@ export default function EmployeeLeavePage() {
                     <p className="eyebrow">Employee Report</p>
                     <h2>{reportEmployee.name}</h2>
                     <p className="subtitle">
-                      Passport/ID {reportEmployee.passport_id} | Hire date {reportEmployee.hire_date}
+                      Passport/ID {reportEmployee.passport_id} | Permanent contract start{" "}
+                      {reportEmployee.permanent_contract_start_date || "Not set"}
                     </p>
                   </div>
                 </div>

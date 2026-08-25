@@ -168,7 +168,7 @@ def startup_event() -> None:
         )
         connection.execute(
             text(
-                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS hire_date DATE NOT NULL DEFAULT CURRENT_DATE"
+                "ALTER TABLE employees DROP COLUMN IF EXISTS hire_date"
             )
         )
         connection.execute(
@@ -252,7 +252,6 @@ def create_employee(
         name=payload.name.strip(),
         department=payload.department.strip(),
         passport_id=passport_id,
-        hire_date=payload.hire_date,
         startup_data=build_startup_defaults(),
     )
     db.add(employee)
@@ -298,7 +297,6 @@ def update_employee(
     employee.name = payload.name.strip()
     employee.department = payload.department.strip()
     employee.passport_id = passport_id
-    employee.hire_date = payload.hire_date
     db.add(employee)
     try:
         db.commit()
@@ -498,15 +496,62 @@ def _hidden_uniform_issue_documents_query(db: Session, employee_id: int) -> list
     ]
 
 
+def _parse_iso_date(value: object) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _permanent_contract_start_date(employee: Employee) -> date | None:
+    startup_data = employee.startup_data or {}
+    contract_status = startup_data.get("Contract Status")
+    if not isinstance(contract_status, dict):
+        return None
+
+    entries = contract_status.get("entries")
+    candidate_dates: list[date] = []
+
+    if isinstance(entries, list):
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("status") != "Permanent":
+                continue
+            parsed_date = _parse_iso_date(entry.get("date"))
+            if parsed_date is not None:
+                candidate_dates.append(parsed_date)
+
+    if not candidate_dates and contract_status.get("status") == "Permanent":
+        parsed_date = _parse_iso_date(contract_status.get("date"))
+        if parsed_date is not None:
+            candidate_dates.append(parsed_date)
+
+    if not candidate_dates:
+        return None
+
+    return max(candidate_dates)
+
+
 def calculate_annual_leave_balance(employee_id: int) -> tuple[float, float]:
     with SessionLocal() as db:
         employee = db.get(Employee, employee_id)
         if employee is None:
             return 0, 0
 
-        hire_date = employee.hire_date
+        permanent_start_date = _permanent_contract_start_date(employee)
+        if permanent_start_date is None:
+            return 0, 0
+
         today = date.today()
-        months_employed = max(0, (today.year - hire_date.year) * 12 + (today.month - hire_date.month))
+        months_employed = max(
+            0,
+            (today.year - permanent_start_date.year) * 12 + (today.month - permanent_start_date.month),
+        )
 
         if employee.passport_id == "8601310127086":
             entitlement = months_employed * (20 / 12)
@@ -532,9 +577,12 @@ def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
         if employee is None:
             return 0, 0
 
-        hire_date = employee.hire_date
+        permanent_start_date = _permanent_contract_start_date(employee)
+        if permanent_start_date is None:
+            return 0, 0
+
         today = date.today()
-        days_employed = (today - hire_date).days
+        days_employed = (today - permanent_start_date).days
 
         if days_employed < 180:
             entitlement = 6
@@ -551,7 +599,7 @@ def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
 
         days_after_six_months = days_employed - 180
         complete_cycles = days_after_six_months // 1095
-        cycle_start_date = hire_date + timedelta(days=180 + (complete_cycles * 1095))
+        cycle_start_date = permanent_start_date + timedelta(days=180 + (complete_cycles * 1095))
 
         used_days = (
             db.scalar(
@@ -571,7 +619,7 @@ def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
                     select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
                         SickLeave.employee_id == employee_id,
                         SickLeave.status == "Approved",
-                        SickLeave.start_date < (hire_date + timedelta(days=180)),
+                        SickLeave.start_date < (permanent_start_date + timedelta(days=180)),
                     )
                 )
                 or 0
@@ -1306,7 +1354,7 @@ def employee_leave_report(
                 id=employee.id,
                 name=employee.name,
                 passport_id=employee.passport_id,
-                hire_date=employee.hire_date,
+                permanent_contract_start_date=_permanent_contract_start_date(employee),
                 annual_leave_entitlement=round(float(annual_entitlement), 2),
                 annual_leave_balance=round(float(annual_balance), 2),
                 sick_leave_entitlement=round(float(sick_entitlement), 2),

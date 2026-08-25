@@ -70,7 +70,7 @@ export async function fetchEmployees(token) {
   return data;
 }
 
-export async function createEmployee(token, name, department, passportId, hireDate) {
+export async function createEmployee(token, name, department, passportId) {
   const response = await fetch("/api/employees", {
     method: "POST",
     headers: {
@@ -81,7 +81,6 @@ export async function createEmployee(token, name, department, passportId, hireDa
       name,
       department,
       passport_id: passportId,
-      hire_date: hireDate,
     }),
   });
 
@@ -94,7 +93,7 @@ export async function createEmployee(token, name, department, passportId, hireDa
   return data;
 }
 
-export async function updateEmployee(token, employeeId, name, department, passportId, hireDate) {
+export async function updateEmployee(token, employeeId, name, department, passportId) {
   const response = await fetch(`/api/employees/${employeeId}`, {
     method: "PUT",
     headers: {
@@ -105,7 +104,6 @@ export async function updateEmployee(token, employeeId, name, department, passpo
       name,
       department,
       passport_id: passportId,
-      hire_date: hireDate,
     }),
   });
 
@@ -234,6 +232,22 @@ export async function fetchSickLeave(token, employeeId = null) {
 
   if (!response.ok) {
     throw new Error(data.detail || "Unable to load sick leave");
+  }
+
+  return data;
+}
+
+export async function fetchEmployeeLeaveReport(token) {
+  const response = await fetch("/api/employee-leave/report", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load employee leave report");
   }
 
   return data;
