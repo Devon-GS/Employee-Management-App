@@ -169,6 +169,11 @@ def startup_event() -> None:
         )
         connection.execute(
             text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        connection.execute(
+            text(
                 "ALTER TABLE employees DROP COLUMN IF EXISTS hire_date"
             )
         )
@@ -234,7 +239,24 @@ def list_employees(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[EmployeeResponse]:
-    employees = db.scalars(select(Employee).order_by(Employee.name.asc())).all()
+    employees = db.scalars(
+        select(Employee)
+        .where(Employee.archived.is_(False))
+        .order_by(Employee.name.asc())
+    ).all()
+    return employees
+
+
+@app.get("/api/archived-employees", response_model=list[EmployeeResponse])
+def list_archived_employees(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[EmployeeResponse]:
+    employees = db.scalars(
+        select(Employee)
+        .where(Employee.archived.is_(True))
+        .order_by(Employee.name.asc())
+    ).all()
     return employees
 
 
@@ -308,6 +330,34 @@ def update_employee(
     return employee
 
 
+@app.post("/api/employees/{employee_id}/archive", response_model=EmployeeResponse)
+def archive_employee(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmployeeResponse:
+    employee = _get_employee_or_404(db, employee_id)
+    employee.archived = True
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+    return employee
+
+
+@app.post("/api/employees/{employee_id}/restore", response_model=EmployeeResponse)
+def restore_employee(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmployeeResponse:
+    employee = _get_employee_or_404(db, employee_id)
+    employee.archived = False
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+    return employee
+
+
 @app.get("/api/employees/{employee_id}/startup")
 def get_employee_startup(
     employee_id: int,
@@ -321,6 +371,7 @@ def get_employee_startup(
         "employee_id": employee.id,
         "employee_name": employee.name,
         "department": employee.department,
+        "archived": employee.archived,
         "startup_data": normalize_startup_data(employee.startup_data),
     }
 
@@ -683,6 +734,7 @@ def get_employee_profile(
         name=employee.name,
         department=employee.department,
         passport_id=employee.passport_id,
+        archived=employee.archived,
         permanent_contract_start_date=_permanent_contract_start_date(employee),
         permit_expire_date=_permit_expire_date(employee),
         annual_leave_entitlement=annual_entitlement,
@@ -1151,6 +1203,7 @@ def list_annual_leave(
     query = (
         select(AnnualLeave, Employee.name)
         .join(Employee, AnnualLeave.employee_id == Employee.id)
+        .where(Employee.archived.is_(False))
         .order_by(AnnualLeave.start_date.desc(), AnnualLeave.id.desc())
     )
     if employee_id is not None:
@@ -1279,6 +1332,7 @@ def list_sick_leave(
     query = (
         select(SickLeave, Employee.name)
         .join(Employee, SickLeave.employee_id == Employee.id)
+        .where(Employee.archived.is_(False))
         .order_by(SickLeave.start_date.desc(), SickLeave.id.desc())
     )
     if employee_id is not None:
@@ -1387,15 +1441,21 @@ def employee_leave_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> EmployeeLeaveReportResponse:
-    employees = db.scalars(select(Employee).order_by(Employee.name.asc())).all()
+    employees = db.scalars(
+        select(Employee)
+        .where(Employee.archived.is_(False))
+        .order_by(Employee.name.asc())
+    ).all()
     annual = db.execute(
         select(AnnualLeave, Employee.name)
         .join(Employee, AnnualLeave.employee_id == Employee.id)
+        .where(Employee.archived.is_(False))
         .order_by(AnnualLeave.start_date.desc(), AnnualLeave.id.desc())
     ).all()
     sick = db.execute(
         select(SickLeave, Employee.name)
         .join(Employee, SickLeave.employee_id == Employee.id)
+        .where(Employee.archived.is_(False))
         .order_by(SickLeave.start_date.desc(), SickLeave.id.desc())
     ).all()
 

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
+import ArchivedEmployeesPage from "./pages/ArchivedEmployeesPage";
 import EditUniformPage from "./pages/EditUniformPage";
 import EmployeeLeavePage from "./pages/EmployeeLeavePage";
 import EmployeeProfilePage from "./pages/EmployeeProfilePage";
@@ -56,6 +57,15 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/archived-employees"
+        element={
+          <ProtectedRoute>
+            <ArchivedEmployeesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/achieved-employees" element={<Navigate to="/archived-employees" replace />} />
       <Route
         path="/employees/:employeeId/startup"
         element={

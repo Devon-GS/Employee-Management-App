@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
+  archiveEmployee,
   createEmployee,
   deleteEmployeeDocument,
   downloadEmployeeDocument,
@@ -232,6 +233,22 @@ export default function EmployeesPage() {
     }
   }
 
+  async function handleArchiveEmployee(employee) {
+    const confirmed = window.confirm(
+      `Archive ${employee.name}? Their profile, uploads, and leave history will be kept.`,
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await archiveEmployee(token, employee.id);
+      setEmployees((current) => current.filter((currentEmployee) => currentEmployee.id !== employee.id));
+    } catch (err) {
+      setPageError(err.message || "Unable to archive employee");
+    }
+  }
+
   async function handleSave(event) {
     event.preventDefault();
     setSubmitting(true);
@@ -332,7 +349,7 @@ export default function EmployeesPage() {
                         >
                           General
                         </button>
-                        <button className="secondary-button" type="button">
+                        <button className="secondary-button" type="button" onClick={() => handleArchiveEmployee(employee)}>
                           Delete
                         </button>
                         <button className="secondary-button edit-button" type="button" onClick={() => openEditModal(employee)}>

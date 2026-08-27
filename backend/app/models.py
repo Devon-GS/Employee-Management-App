@@ -1,6 +1,6 @@
 from datetime import date
 
-from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,7 @@ class Employee(Base):
     department: Mapped[str | None] = mapped_column(String(50), nullable=True)
     passport_id: Mapped[str] = mapped_column(String(120), nullable=False)
     startup_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ContractFile(Base):

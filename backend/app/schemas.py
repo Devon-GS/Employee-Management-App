@@ -39,6 +39,7 @@ class EmployeeResponse(BaseModel):
     department: str | None = None
     passport_id: str
     startup_data: dict = Field(default_factory=dict)
+    archived: bool = False
 
 
 class EmployeeProfileResponse(BaseModel):
@@ -48,6 +49,7 @@ class EmployeeProfileResponse(BaseModel):
     name: str
     department: str | None = None
     passport_id: str
+    archived: bool = False
     permanent_contract_start_date: date | None = None
     permit_expire_date: date | None = None
     annual_leave_entitlement: float

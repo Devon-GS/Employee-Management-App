@@ -26,6 +26,9 @@ export default function Navbar({ title = "Dashboard" }) {
         <Link className="nav-link" to="/employee-leave">
           Employee Leave
         </Link>
+        <Link className="nav-link" to="/archived-employees">
+          Archived Employees
+        </Link>
         <Link className="nav-link" to="/change-password">
           Change Password
         </Link>

@@ -70,6 +70,22 @@ export async function fetchEmployees(token) {
   return data;
 }
 
+export async function fetchArchivedEmployees(token) {
+  const response = await fetch("/api/archived-employees", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load archived employees");
+  }
+
+  return data;
+}
+
 export async function createEmployee(token, name, department, passportId) {
   const response = await fetch("/api/employees", {
     method: "POST",
@@ -111,6 +127,40 @@ export async function updateEmployee(token, employeeId, name, department, passpo
 
   if (!response.ok) {
     throw new Error(data.detail || "Unable to update employee");
+  }
+
+  return data;
+}
+
+export async function archiveEmployee(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/archive`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to archive employee");
+  }
+
+  return data;
+}
+
+export async function restoreEmployee(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/restore`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to restore employee");
   }
 
   return data;

@@ -160,11 +160,16 @@ export default function EmployeeProfilePage() {
                   <p className="subtitle">
                     Department {profile.department || "Not set"} | Passport/ID {profile.passport_id}
                   </p>
+                  {profile.archived ? <span className="status-pill archived">Archived</span> : null}
                 </div>
 
                 <div className="profile-summary-actions">
-                  <button className="secondary-button" type="button" onClick={() => navigate("/employees")}>
-                    Back to Employees
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => navigate(profile.archived ? "/archived-employees" : "/employees")}
+                  >
+                    Back to {profile.archived ? "Archived Employees" : "Employees"}
                   </button>
                   <button className="secondary-button" type="button" onClick={() => navigate(`/employees/${employeeId}/startup`)}>
                     View Startup

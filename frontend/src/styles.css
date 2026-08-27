@@ -528,6 +528,11 @@ input {
   color: #b91c1c;
 }
 
+.status-pill.archived {
+  background: rgba(71, 85, 105, 0.14);
+  color: #475569;
+}
+
 .report-picker {
   display: grid;
   gap: 8px;
