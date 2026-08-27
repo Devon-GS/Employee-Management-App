@@ -148,6 +148,22 @@ export async function fetchEmployee(token, employeeId) {
   return data;
 }
 
+export async function fetchEmployeeProfile(token, employeeId) {
+  const response = await fetch(`/api/employees/${employeeId}/profile`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Unable to load employee profile");
+  }
+
+  return data;
+}
+
 export async function fetchAnnualLeave(token, employeeId = null) {
   const query = employeeId ? `?employee_id=${encodeURIComponent(employeeId)}` : "";
   const response = await fetch(`/api/annual-leave${query}`, {

@@ -307,11 +307,8 @@ export default function EmployeesPage() {
                         <button
                           className="secondary-button"
                           type="button"
-                          onClick={() => navigate(`/employees/${employee.id}/startup`)}
+                          onClick={() => navigate(`/employees/${employee.id}/profile`)}
                         >
-                          Startup
-                        </button>
-                        <button className="secondary-button" type="button">
                           View
                         </button>
                         <button

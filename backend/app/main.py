@@ -24,6 +24,7 @@ from .schemas import (
     ContractFileResponse,
     EmployeeCreateRequest,
     EmployeeDocumentResponse,
+    EmployeeProfileResponse,
     EmployeeLeaveReportResponse,
     EmployeeLeaveSummaryResponse,
     EmployeeResponse,
@@ -537,6 +538,15 @@ def _permanent_contract_start_date(employee: Employee) -> date | None:
     return max(candidate_dates)
 
 
+def _permit_expire_date(employee: Employee) -> date | None:
+    startup_data = employee.startup_data or {}
+    permit_status = startup_data.get("Permit Status")
+    if not isinstance(permit_status, dict):
+        return None
+
+    return _parse_iso_date(permit_status.get("date"))
+
+
 def calculate_annual_leave_balance(employee_id: int) -> tuple[float, float]:
     with SessionLocal() as db:
         employee = db.get(Employee, employee_id)
@@ -655,6 +665,30 @@ def _sick_leave_response(leave: SickLeave, employee_name: str) -> SickLeaveRespo
         days_used=float(leave.days_used),
         medical_cert=leave.medical_cert,
         status=leave.status,
+    )
+
+
+@app.get("/api/employees/{employee_id}/profile", response_model=EmployeeProfileResponse)
+def get_employee_profile(
+    employee_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> EmployeeProfileResponse:
+    employee = _get_employee_or_404(db, employee_id)
+    annual_entitlement, annual_balance = calculate_annual_leave_balance(employee_id)
+    sick_entitlement, sick_balance = calculate_sick_leave_balance(employee_id)
+
+    return EmployeeProfileResponse(
+        id=employee.id,
+        name=employee.name,
+        department=employee.department,
+        passport_id=employee.passport_id,
+        permanent_contract_start_date=_permanent_contract_start_date(employee),
+        permit_expire_date=_permit_expire_date(employee),
+        annual_leave_entitlement=annual_entitlement,
+        annual_leave_balance=annual_balance,
+        sick_leave_entitlement=sick_entitlement,
+        sick_leave_balance=sick_balance,
     )
 
 

@@ -4,6 +4,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import ChangePasswordPage from "./pages/ChangePasswordPage";
 import EditUniformPage from "./pages/EditUniformPage";
 import EmployeeLeavePage from "./pages/EmployeeLeavePage";
+import EmployeeProfilePage from "./pages/EmployeeProfilePage";
 import EmployeeStartupPage from "./pages/EmployeeStartupPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -60,6 +61,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <EmployeeStartupPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/employees/:employeeId/profile"
+        element={
+          <ProtectedRoute>
+            <EmployeeProfilePage />
           </ProtectedRoute>
         }
       />

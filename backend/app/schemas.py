@@ -41,6 +41,21 @@ class EmployeeResponse(BaseModel):
     startup_data: dict = Field(default_factory=dict)
 
 
+class EmployeeProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    department: str | None = None
+    passport_id: str
+    permanent_contract_start_date: date | None = None
+    permit_expire_date: date | None = None
+    annual_leave_entitlement: float
+    annual_leave_balance: float
+    sick_leave_entitlement: float
+    sick_leave_balance: float
+
+
 class EmployeeUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
