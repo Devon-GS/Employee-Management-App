@@ -1108,6 +1108,11 @@ input {
   padding: 22px;
 }
 
+.leave-modal {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
