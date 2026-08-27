@@ -145,24 +145,6 @@ export default function EmployeeProfilePage() {
     <main className="dashboard-shell">
       <Navbar title="Employee Profile" />
       <section className="content-panel employee-profile-panel">
-        <div className="employees-toolbar employee-profile-toolbar">
-          <div className="panel-copy">
-            <p className="eyebrow">Employee Profile</p>
-            <h1>{profile?.name || "Employee"}</h1>
-            <p className="subtitle">
-              A quick profile view with employment dates, leave balances, and employee documents.
-            </p>
-          </div>
-          <div className="profile-toolbar-actions">
-            <button className="secondary-button" type="button" onClick={() => navigate("/employees")}>
-              Back to Employees
-            </button>
-            <button className="secondary-button" type="button" onClick={() => navigate(`/employees/${employeeId}/startup`)}>
-              View Startup
-            </button>
-          </div>
-        </div>
-
         {error ? <div className="error-banner">{error}</div> : null}
         {documentError ? <div className="error-banner">{documentError}</div> : null}
 
@@ -180,19 +162,28 @@ export default function EmployeeProfilePage() {
                   </p>
                 </div>
 
-                <div className="profile-link-row" aria-label="Jump to document sections">
-                  {DOCUMENT_GROUPS.map((group) => (
-                    <button
-                      key={group.key}
-                      className="profile-jump-button"
-                      type="button"
-                      onClick={() => scrollToSection(`document-section-${group.key}`)}
-                    >
-                      {group.label}
-                    </button>
-                  ))}
+                <div className="profile-summary-actions">
+                  <button className="secondary-button" type="button" onClick={() => navigate("/employees")}>
+                    Back to Employees
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => navigate(`/employees/${employeeId}/startup`)}>
+                    View Startup
+                  </button>
                 </div>
               </div>
+
+              {/* <div className="profile-link-row" aria-label="Jump to document sections">
+                {DOCUMENT_GROUPS.map((group) => (
+                  <button
+                    key={group.key}
+                    className="profile-jump-button"
+                    type="button"
+                    onClick={() => scrollToSection(`document-section-${group.key}`)}
+                  >
+                    {group.label}
+                  </button>
+                ))}
+              </div> */}
 
               <div className="profile-stats-grid">
                 <article className="profile-stat-card">

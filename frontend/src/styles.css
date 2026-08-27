@@ -329,7 +329,9 @@ input {
 }
 
 .profile-summary-card {
-  display: grid;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 18px;
   padding: 22px;
   border: 1px solid rgba(19, 32, 51, 0.1);
@@ -346,6 +348,13 @@ input {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.profile-summary-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .profile-jump-button {
