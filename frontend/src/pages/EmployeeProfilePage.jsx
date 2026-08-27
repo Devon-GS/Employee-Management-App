@@ -5,7 +5,9 @@ import {
   downloadEmployeeDocument,
   fetchEmployeeDocuments,
   fetchEmployeeProfile,
+  fetchSickLeave,
   viewEmployeeDocument,
+  viewSickLeaveMedicalCert,
 } from "../api";
 import Navbar from "../components/Navbar";
 
@@ -67,6 +69,7 @@ export default function EmployeeProfilePage() {
     bank_acc: [],
     general: [],
   });
+  const [medicalCerts, setMedicalCerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [documentLoading, setDocumentLoading] = useState(true);
   const [error, setError] = useState("");
@@ -82,11 +85,12 @@ export default function EmployeeProfilePage() {
       setDocumentError("");
 
       try {
-        const [profileData, warningData, bankAccData, generalData] = await Promise.all([
+        const [profileData, warningData, bankAccData, generalData, sickLeaveData] = await Promise.all([
           fetchEmployeeProfile(token, employeeId),
           fetchEmployeeDocuments(token, employeeId, "written_warning"),
           fetchEmployeeDocuments(token, employeeId, "bank_acc"),
           fetchEmployeeDocuments(token, employeeId, "general"),
+          fetchSickLeave(token, employeeId),
         ]);
 
         if (!mounted) {
@@ -99,6 +103,7 @@ export default function EmployeeProfilePage() {
           bank_acc: bankAccData,
           general: generalData,
         });
+        setMedicalCerts((sickLeaveData || []).filter((leave) => leave.medical_cert));
       } catch (err) {
         if (mounted) {
           setError(err.message || "Unable to load employee profile");
@@ -131,6 +136,14 @@ export default function EmployeeProfilePage() {
       await downloadEmployeeDocument(token, document.id, document.original_filename);
     } catch (err) {
       setDocumentError(err.message || "Unable to download file");
+    }
+  }
+
+  async function handleViewMedicalCert(leaveId) {
+    try {
+      await viewSickLeaveMedicalCert(token, leaveId);
+    } catch (err) {
+      setDocumentError(err.message || "Unable to view medical certificate");
     }
   }
 
@@ -232,6 +245,73 @@ export default function EmployeeProfilePage() {
                     <div className="table-wrap">
                       {documentLoading ? (
                         <div className="table-state">Loading documents...</div>
+                      ) : group.key === "general" ? (
+                        <div className="profile-document-stack">
+                          <div className="profile-document-list">
+                            {groupDocuments.length === 0 ? (
+                              <div className="table-state">No general files uploaded yet.</div>
+                            ) : (
+                              groupDocuments.map((document) => (
+                                <article key={document.id} className="profile-document-card">
+                                  <div className="profile-document-meta">
+                                    <strong>{document.original_filename}</strong>
+                                    <span>{formatBytes(document.size_bytes)}</span>
+                                  </div>
+                                  <div className="table-actions">
+                                    <button
+                                      className="secondary-button"
+                                      type="button"
+                                      onClick={() => handleViewDocument(document.id)}
+                                    >
+                                      View
+                                    </button>
+                                    <button
+                                      className="secondary-button"
+                                      type="button"
+                                      onClick={() => handleDownloadDocument(document)}
+                                    >
+                                      Download
+                                    </button>
+                                  </div>
+                                </article>
+                              ))
+                            )}
+                          </div>
+
+                          <div className="profile-document-section">
+                            <div className="leave-section-header">
+                              <div>
+                                <h2>Medical Certificates</h2>
+                                <p>View all medical certificate uploads attached to this employee's sick leave records.</p>
+                              </div>
+                            </div>
+                            {medicalCerts.length === 0 ? (
+                              <div className="table-state">No medical certificates uploaded yet.</div>
+                            ) : (
+                              <div className="profile-document-list">
+                                {medicalCerts.map((leave) => (
+                                  <article key={leave.id} className="profile-document-card">
+                                    <div className="profile-document-meta">
+                                      <strong>{leave.medical_cert}</strong>
+                                      <span>
+                                        {leave.start_date} to {leave.end_date}
+                                      </span>
+                                    </div>
+                                    <div className="table-actions">
+                                      <button
+                                        className="secondary-button"
+                                        type="button"
+                                        onClick={() => handleViewMedicalCert(leave.id)}
+                                      >
+                                        View
+                                      </button>
+                                    </div>
+                                  </article>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ) : groupDocuments.length === 0 ? (
                         <div className="table-state">No {group.label.toLowerCase()} files uploaded yet.</div>
                       ) : (
