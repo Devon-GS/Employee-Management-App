@@ -1328,6 +1328,26 @@ def delete_sick_leave(
     return {"message": "Sick leave deleted"}
 
 
+@app.get("/api/sick-leave/{leave_id}/medical-cert/view")
+def view_sick_leave_medical_cert(
+    leave_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    leave = db.get(SickLeave, leave_id)
+    if leave is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sick leave not found")
+
+    if not leave.medical_cert:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical certificate not found")
+
+    path = _medical_cert_path(leave.medical_cert)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical certificate missing from storage")
+
+    return FileResponse(path, filename=Path(leave.medical_cert).name)
+
+
 @app.get("/api/employee-leave/report", response_model=EmployeeLeaveReportResponse)
 def employee_leave_report(
     current_user: User = Depends(get_current_user),

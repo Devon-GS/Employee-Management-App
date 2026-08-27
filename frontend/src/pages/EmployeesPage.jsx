@@ -13,7 +13,7 @@ import {
 } from "../api";
 import Navbar from "../components/Navbar";
 
-const DEPARTMENT_OPTIONS = ["Forecourt", "Cashier", "Baker", "Car Wash"];
+const DEPARTMENT_OPTIONS = ["Forecourt", "Cashier", "Baker", "Car Wash", "Manager"];
 const ALLOWED_FILE_TYPES = ".pdf,.doc,.docx,.jpg,.jpeg,.xls,.xlsx";
 const DOCUMENT_LABELS = {
   bank_acc: "Bank Acc",

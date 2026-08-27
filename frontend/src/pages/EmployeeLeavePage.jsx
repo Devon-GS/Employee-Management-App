@@ -10,6 +10,7 @@ import {
   fetchSickLeave,
   updateAnnualLeave,
   updateSickLeave,
+  viewSickLeaveMedicalCert,
 } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import Navbar from "../components/Navbar";
@@ -213,6 +214,14 @@ export default function EmployeeLeavePage() {
     }
   }
 
+  async function handleViewMedicalCert(leaveId) {
+    try {
+      await viewSickLeaveMedicalCert(token, leaveId);
+    } catch (err) {
+      setError(err.message || "Unable to view medical certificate");
+    }
+  }
+
   const reportEmployee =
     reportEmployees.find((employee) => employee.id === Number(selectedReportEmployeeId)) || null;
   const reportAnnualRecords = annualLeave.filter(
@@ -359,6 +368,15 @@ export default function EmployeeLeavePage() {
                         </td>
                         <td>
                           <div className="table-actions">
+                            {leave.medical_cert ? (
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() => handleViewMedicalCert(leave.id)}
+                              >
+                                View
+                              </button>
+                            ) : null}
                             <button className="secondary-button" type="button" onClick={() => openRecordModal("sick", leave)}>
                               Edit
                             </button>

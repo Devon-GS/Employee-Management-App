@@ -306,6 +306,13 @@ export async function deleteSickLeave(token, leaveId) {
   return data;
 }
 
+export async function viewSickLeaveMedicalCert(token, leaveId) {
+  const blob = await fetchFileBlob(token, `/api/sick-leave/${leaveId}/medical-cert/view`);
+  const objectUrl = window.URL.createObjectURL(blob);
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 export async function fetchUniformIssue(token, employeeId) {
   const response = await fetch(`/api/employees/${employeeId}/uniform-issue-workbook`, {
     headers: {
