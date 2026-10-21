@@ -646,7 +646,7 @@ def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
         days_employed = (today - permanent_start_date).days
 
         if days_employed < 180:
-            entitlement = 6
+            entitlement = days_employed // 26
             used_days = (
                 db.scalar(
                     select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
