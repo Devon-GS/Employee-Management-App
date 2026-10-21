@@ -517,7 +517,7 @@ def _uniform_issue_rows_from_workbook(workbook) -> list[dict[str, str]]:
         description = _cell_text(worksheet[f"A{row_number}"].value) or ""
         if not description and all(
             _cell_text(worksheet[f"{column}{row_number}"].value) is None
-            for column in ["B", "C", "D", "E", "G", "H"]
+            for column in ["B", "C", "D", "E", "F", "G"]
         ):
             continue
 
@@ -527,8 +527,8 @@ def _uniform_issue_rows_from_workbook(workbook) -> list[dict[str, str]]:
             "quantity": _cell_text(worksheet[f"C{row_number}"].value) or "",
             "condition": _cell_text(worksheet[f"D{row_number}"].value) or "",
             "details": _cell_text(worksheet[f"E{row_number}"].value) or "",
-            "returns": _cell_text(worksheet[f"G{row_number}"].value) or "",
-            "cost": _cell_text(worksheet[f"H{row_number}"].value) or "",
+            "returns": _cell_text(worksheet[f"F{row_number}"].value) or "",
+            "cost": _cell_text(worksheet[f"G{row_number}"].value) or "",
         })
 
     return rows
@@ -1013,7 +1013,7 @@ def save_uniform_issue_document(
     worksheet["A4"] = employee.name
 
     for row_number in range(7, 7 + UNIFORM_ISSUE_MAX_ROWS):
-        for column in ["A", "B", "C", "D", "E", "G", "H"]:
+        for column in ["A", "B", "C", "D", "E", "F", "G"]:
             worksheet[f"{column}{row_number}"] = None
 
     for index, row_data in enumerate(cleaned_rows):
@@ -1023,8 +1023,8 @@ def save_uniform_issue_document(
         worksheet[f"C{row_number}"] = row_data["quantity"]
         worksheet[f"D{row_number}"] = row_data["condition"]
         worksheet[f"E{row_number}"] = row_data["details"]
-        worksheet[f"G{row_number}"] = row_data["returns"]
-        worksheet[f"H{row_number}"] = row_data["cost"]
+        worksheet[f"F{row_number}"] = row_data["returns"]
+        worksheet[f"G{row_number}"] = row_data["cost"]
 
     safe_employee_name = _sanitize_filename_part(employee.name)
     original_filename = f"ISSUE-Uniforms - {safe_employee_name}.xlsx"
