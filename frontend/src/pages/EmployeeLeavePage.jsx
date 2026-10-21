@@ -362,7 +362,7 @@ export default function EmployeeLeavePage() {
                           {leave.start_date} to {leave.end_date}
                         </td>
                         <td>{formatDays(leave.days_used)}</td>
-                        <td>{leave.medical_cert || "-"}</td>
+                        <td>{leave.medical_cert ? `med-${leave.start_date}_to_${leave.end_date}` : "-"}</td>
                         <td>
                           <span className={`status-pill ${statusClass(leave.status)}`}>{leave.status}</span>
                         </td>

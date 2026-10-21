@@ -292,7 +292,7 @@ export default function EmployeeProfilePage() {
                                 {medicalCerts.map((leave) => (
                                   <article key={leave.id} className="profile-document-card">
                                     <div className="profile-document-meta">
-                                      <strong>{leave.medical_cert}</strong>
+                                      <strong>{`med-${leave.start_date}_to_${leave.end_date}`}</strong>
                                       <span>
                                         {leave.start_date} to {leave.end_date}
                                       </span>
