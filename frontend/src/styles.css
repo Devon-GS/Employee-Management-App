@@ -293,6 +293,23 @@ input {
   min-height: calc(100vh - 120px);
 }
 
+.dashboard-panel {
+  grid-template-columns: 1fr;
+}
+
+.dashboard-status-table {
+  min-width: 760px;
+}
+
+.dashboard-incomplete-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.dashboard-permit-nearing {
+  background: red;
+}
+
 .employees-panel {
   grid-template-columns: 1fr;
 }
