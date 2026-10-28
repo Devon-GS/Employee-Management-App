@@ -5,7 +5,7 @@ const AuthContext = createContext(null);
 const TOKEN_KEY = "employee-app-token";
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState(() => sessionStorage.getItem(TOKEN_KEY)); 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,7 +24,7 @@ export function AuthProvider({ children }) {
           setUser(currentUser);
         }
       } catch {
-        localStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(TOKEN_KEY); 
         if (mounted) {
           setToken(null);
           setUser(null);
@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
 
   async function login(username, password) {
     const result = await loginRequest(username, password);
-    localStorage.setItem(TOKEN_KEY, result.access_token);
+    sessionStorage.setItem(TOKEN_KEY, result.access_token); 
     setToken(result.access_token);
     const currentUser = await fetchCurrentUser(result.access_token);
     setUser(currentUser);
@@ -53,7 +53,7 @@ export function AuthProvider({ children }) {
   }
 
   function logout() {
-    localStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(TOKEN_KEY); 
     setToken(null);
     setUser(null);
   }
