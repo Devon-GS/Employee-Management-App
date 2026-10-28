@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: employee-management
+    container_name: employee-management-db
     environment:
       POSTGRES_DB: employee_app
       POSTGRES_USER: manager
@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    container_name: employee-backend
     volumes:
       - uploads_data:/app/uploads
     environment:
@@ -35,6 +36,7 @@ services:
   frontend:
     build:
       context: ./frontend
+    container_name: employee-frontend
     depends_on:
       - backend
     ports:
