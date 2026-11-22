@@ -177,7 +177,7 @@ export default function EmployeeLeavePage() {
         if (medicalCertFile) {
           formData.append("medical_cert_file", medicalCertFile);
         } else if (editingRecordId) {
-          formData.append("medical_cert", removeMedicalCert ? "" : existingMedicalCert || "");
+          formData.append("medical_cert", removeMedicalCert ? "" : "__keep__");
         }
 
         editingRecordId

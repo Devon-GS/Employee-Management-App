@@ -153,9 +153,10 @@ DATABASE_URL=postgresql+psycopg2://manager:${DB_PASSWORD}@db:5432/employee_app
 
 # Security & Authentication
 JWT_SECRET_KEY=generate_a_secure_random_hex_key_here
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
+ACCESS_TOKEN_EXPIRE_MINUTES=30
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=replace_with_a_strong_initial_password
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
 
 # File Storage Configuration
 UPLOAD_DIR=/app/uploads
@@ -167,6 +168,8 @@ TEMPLATE_DIR=/app/Document Templates
 > ```bash
 > python3 -c "import secrets; print(secrets.token_hex(32))"
 > ```
+
+`JWT_SECRET_KEY` must be at least 32 characters. `ADMIN_USERNAME` must be 1–50 characters after trimming. `ADMIN_PASSWORD` must be at least 12 characters. `DATABASE_URL` is required when running the backend directly; Docker Compose supplies it automatically. `CORS_ALLOWED_ORIGINS` is optional; when omitted, it allows the local development frontend origins shown above. Set it to a comma-separated allowlist when the frontend is hosted elsewhere.
 
 ---
 
@@ -181,6 +184,16 @@ On first startup, the application seeds one account using the credentials in `.e
 > Set a strong `ADMIN_PASSWORD` before the first deployment. These variables are used only when the database has no user account; changing them later does not reset an existing account.
 
 After signing in, open **Change Password** in the navigation to update the username, password, or both. The current password is required for every account update. Leave the new-password field blank when changing only the username.
+
+### Local development and production transport security
+
+The default Docker Compose setup is intended for local development. PostgreSQL, the backend API, and the frontend are bound to `127.0.0.1`, so `http://localhost:3000` remains available while those services are not exposed on every network interface.
+
+The backend trusts forwarded client-IP headers only from the Docker private `172.16.0.0/12` network. If your deployment uses a different Docker network range or an external reverse proxy, update `--forwarded-allow-ips` in `backend/Dockerfile` to the trusted proxy address/range.
+
+For production, terminate TLS at a reverse proxy or load balancer in front of the frontend. Redirect HTTP to HTTPS and add HSTS at that production TLS layer; the default local `frontend/nginx.conf` intentionally does not force HTTPS or emit HSTS so `http://localhost` continues to work.
+
+The local Nginx configuration includes a restrictive CSP that permits the built React application and the `blob:`/`data:` sources used for PDF and image previews. It also enables MIME sniffing protection, frame protection, and a strict referrer policy.
 
 ---
 

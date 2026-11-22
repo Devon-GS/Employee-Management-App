@@ -6,7 +6,7 @@ import { changePasswordRequest } from "../api";
 
 export default function ChangePasswordPage() {
   const navigate = useNavigate();
-  const { token, user, updateUser } = useAuth();
+  const { token, user, logout } = useAuth();
   const [username, setUsername] = useState(user?.username || "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -39,14 +39,14 @@ export default function ChangePasswordPage() {
         currentPassword,
         newPassword,
       );
-      updateUser({ ...user, username: updatedUser.username });
       setMessage("Account updated successfully.");
       setUsername(updatedUser.username);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       window.setTimeout(() => {
-        navigate("/dashboard", { replace: true });
+        logout();
+        navigate("/login", { replace: true });
       }, 1000);
     } catch (err) {
       setError(err.message || "Unable to update password");

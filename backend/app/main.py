@@ -1,6 +1,8 @@
 import copy
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from datetime import date, timedelta
 from uuid import uuid4
@@ -13,7 +15,13 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from openpyxl import load_workbook
 
-from .auth import create_access_token, get_current_user, hash_password, verify_password
+from .auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    is_legacy_password_hash,
+    verify_password,
+)
 from .database import Base, SessionLocal, engine, get_db
 from .models import AnnualLeave, ContractFile, Employee, EmployeeDocument, SickLeave, User
 from .schemas import (
@@ -49,6 +57,28 @@ UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreads
 UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+MIN_ADMIN_PASSWORD_LENGTH = 12
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+INLINE_PREVIEW_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png"}
+MEDICAL_CERT_KEEP = "__keep__"
+UPLOAD_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".xls", ".xlsx"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 ALLOWED_MEDICAL_CERT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"}
@@ -95,16 +125,60 @@ UNIFORM_CARE_LETTER_FILES = {
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
+_login_attempts: dict[str, list[float]] = {}
+_login_attempts_lock = threading.Lock()
+
+
+def _login_rate_limit_key(request: Request, username: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{client_host}:{username.strip().lower()}"
+
+
+def _check_login_rate_limit(key: str) -> None:
+    now = time.monotonic()
+    with _login_attempts_lock:
+        attempts = [timestamp for timestamp in _login_attempts.get(key, []) if now - timestamp < LOGIN_WINDOW_SECONDS]
+        _login_attempts[key] = attempts
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts. Try again later.",
+            )
+
+
+def _record_login_failure(key: str) -> None:
+    now = time.monotonic()
+    with _login_attempts_lock:
+        attempts = [timestamp for timestamp in _login_attempts.get(key, []) if now - timestamp < LOGIN_WINDOW_SECONDS]
+        attempts.append(now)
+        _login_attempts[key] = attempts
+
+
+def _clear_login_failures(key: str) -> None:
+    with _login_attempts_lock:
+        _login_attempts.pop(key, None)
+
+
 def seed_admin_user(db: Session) -> None:
-    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
-        raise RuntimeError("ADMIN_USERNAME and ADMIN_PASSWORD must be configured")
+    if (
+        not ADMIN_USERNAME
+        or len(ADMIN_USERNAME) > 50
+        or not ADMIN_PASSWORD
+        or len(ADMIN_PASSWORD) < MIN_ADMIN_PASSWORD_LENGTH
+    ):
+        raise RuntimeError(
+            "ADMIN_USERNAME must be set and ADMIN_PASSWORD must be set with at least "
+            f"{MIN_ADMIN_PASSWORD_LENGTH} characters"
+        )
 
     existing_user = db.scalar(select(User).order_by(User.id))
     if existing_user is None:
@@ -188,6 +262,12 @@ def startup_event() -> None:
                 "uq_employees_passport_id ON employees (passport_id)"
             )
         )
+        connection.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "token_version INTEGER NOT NULL DEFAULT 0"
+            )
+        )
     db = SessionLocal()
     try:
         seed_admin_user(db)
@@ -201,13 +281,22 @@ def health_check() -> dict[str, str]:
 
 
 @app.post("/api/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    rate_limit_key = _login_rate_limit_key(request, payload.username)
+    _check_login_rate_limit(rate_limit_key)
     user = db.scalar(select(User).where(User.username == payload.username))
     if user is None or not verify_password(payload.password, user.password_hash):
+        _record_login_failure(rate_limit_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
+
+    _clear_login_failures(rate_limit_key)
+    if is_legacy_password_hash(user.password_hash):
+        user.password_hash = hash_password(payload.password)
+        db.add(user)
+        db.commit()
 
     return TokenResponse(access_token=create_access_token(user))
 
@@ -242,6 +331,7 @@ def change_password(
     current_user.username = new_username
     if payload.new_password is not None:
         current_user.password_hash = hash_password(payload.new_password)
+    current_user.token_version += 1
     db.add(current_user)
     try:
         db.commit()
@@ -419,12 +509,70 @@ def _get_employee_or_404(db: Session, employee_id: int) -> Employee:
     return employee
 
 
+def _storage_path(stored_filename: str) -> Path:
+    upload_root = UPLOAD_DIR.resolve()
+    candidate = (upload_root / stored_filename).resolve()
+    if candidate == upload_root or upload_root not in candidate.parents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid stored filename")
+    return candidate
+
+
 def _contract_file_path(stored_filename: str) -> Path:
-    return UPLOAD_DIR / stored_filename
+    return _storage_path(stored_filename)
 
 
 def _document_path(stored_filename: str) -> Path:
-    return UPLOAD_DIR / stored_filename
+    return _storage_path(stored_filename)
+
+
+def _safe_download_filename(filename: str | None) -> str:
+    safe_name = Path(filename or "download").name
+    safe_name = safe_name.replace("\r", "_").replace("\n", "_").replace('"', "_")
+    return safe_name or "download"
+
+
+def _content_type_for_suffix(suffix: str) -> str:
+    return UPLOAD_CONTENT_TYPES.get(suffix.lower(), "application/octet-stream")
+
+
+def _has_valid_file_signature(suffix: str, header: bytes) -> bool:
+    signatures = {
+        ".pdf": header.startswith(b"%PDF-"),
+        ".jpg": header.startswith(b"\xff\xd8\xff"),
+        ".jpeg": header.startswith(b"\xff\xd8\xff"),
+        ".png": header.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".doc": header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+        ".xls": header.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+        ".docx": header.startswith(b"PK\x03\x04"),
+        ".xlsx": header.startswith(b"PK\x03\x04"),
+    }
+    return signatures.get(suffix.lower(), False)
+
+
+async def _validate_upload(file: UploadFile, suffix: str) -> None:
+    header = await file.read(16)
+    await file.seek(0)
+    if not _has_valid_file_signature(suffix, header):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File content does not match its extension")
+
+
+async def _save_upload(file: UploadFile, destination: Path) -> int:
+    size_bytes = 0
+    try:
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(min(1024 * 1024, MAX_UPLOAD_SIZE_BYTES - size_bytes + 1))
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > MAX_UPLOAD_SIZE_BYTES:
+                    raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File is too large")
+                buffer.write(chunk)
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+    return size_bytes
 
 
 def _normalize_document_type(document_type: str) -> str:
@@ -797,6 +945,7 @@ async def upload_contract_file(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="File must be a .pdf, .doc, .docx, .jpg, or .jpeg",
             )
+        await _validate_upload(file, suffix)
 
     created_files: list[ContractFile] = []
 
@@ -807,21 +956,14 @@ async def upload_contract_file(
         stored_filename = f"{uuid4().hex}{suffix}"
         destination = _contract_file_path(stored_filename)
 
-        size_bytes = 0
-        with destination.open("wb") as buffer:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size_bytes += len(chunk)
-                buffer.write(chunk)
+        size_bytes = await _save_upload(file, destination)
 
         created_files.append(
             ContractFile(
                 employee_id=employee_id,
                 original_filename=original_name,
                 stored_filename=stored_filename,
-                content_type=file.content_type or "application/octet-stream",
+                content_type=_content_type_for_suffix(suffix),
                 size_bytes=size_bytes,
             )
         )
@@ -847,11 +989,13 @@ def download_contract_file(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
-    return FileResponse(
+    response = FileResponse(
         path,
         media_type=contract_file.content_type,
-        filename=contract_file.original_filename,
+        filename=_safe_download_filename(contract_file.original_filename),
     )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/api/contract-files/{file_id}/view")
@@ -868,8 +1012,14 @@ def view_contract_file(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
-    response = FileResponse(path, media_type=contract_file.content_type, filename=contract_file.original_filename)
-    response.headers["Content-Disposition"] = f'inline; filename="{contract_file.original_filename}"'
+    response = FileResponse(
+        path,
+        media_type=contract_file.content_type,
+        filename=_safe_download_filename(contract_file.original_filename),
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if contract_file.content_type in INLINE_PREVIEW_CONTENT_TYPES:
+        response.headers["Content-Disposition"] = f'inline; filename="{_safe_download_filename(contract_file.original_filename)}"'
     return response
 
 
@@ -940,6 +1090,7 @@ async def upload_employee_documents(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="File must be a .pdf, .doc, .docx, .jpg, .jpeg, .xls, or .xlsx",
             )
+        await _validate_upload(file, suffix)
 
     created_documents: list[EmployeeDocument] = []
 
@@ -950,14 +1101,7 @@ async def upload_employee_documents(
         stored_filename = f"{uuid4().hex}{suffix}"
         destination = _document_path(stored_filename)
 
-        size_bytes = 0
-        with destination.open("wb") as buffer:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size_bytes += len(chunk)
-                buffer.write(chunk)
+        size_bytes = await _save_upload(file, destination)
 
         created_documents.append(
             EmployeeDocument(
@@ -965,7 +1109,7 @@ async def upload_employee_documents(
                 document_type=document_type,
                 original_filename=original_name,
                 stored_filename=stored_filename,
-                content_type=file.content_type or "application/octet-stream",
+                content_type=_content_type_for_suffix(suffix),
                 size_bytes=size_bytes,
             )
         )
@@ -1121,7 +1265,13 @@ def download_uniform_issue_workbook(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
-    return FileResponse(path, media_type=document.content_type, filename=document.original_filename)
+    response = FileResponse(
+        path,
+        media_type=document.content_type,
+        filename=_safe_download_filename(document.original_filename),
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/api/employees/{employee_id}/uniform-care-letter/download")
@@ -1173,8 +1323,14 @@ def view_employee_document(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
-    response = FileResponse(path, media_type=document.content_type, filename=document.original_filename)
-    response.headers["Content-Disposition"] = f'inline; filename="{document.original_filename}"'
+    response = FileResponse(
+        path,
+        media_type=document.content_type,
+        filename=_safe_download_filename(document.original_filename),
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if document.content_type in INLINE_PREVIEW_CONTENT_TYPES:
+        response.headers["Content-Disposition"] = f'inline; filename="{_safe_download_filename(document.original_filename)}"'
     return response
 
 
@@ -1202,7 +1358,7 @@ def delete_employee_document(
 
 
 def _medical_cert_path(filename: str) -> Path:
-    return UPLOAD_DIR / filename
+    return _storage_path(filename)
 
 
 def _delete_medical_cert(filename: str | None) -> None:
@@ -1301,6 +1457,9 @@ async def _read_sick_leave_payload(request: Request) -> dict:
             end_date = date.fromisoformat(form.get("end_date"))
         except (TypeError, ValueError):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
+        requested_medical_cert = form.get("medical_cert", "")
+        if requested_medical_cert not in ("", MEDICAL_CERT_KEEP):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid medical certificate reference")
         payload = {
             "employee_id": int(form.get("employee_id", 0)),
             "start_date": start_date,
@@ -1308,7 +1467,7 @@ async def _read_sick_leave_payload(request: Request) -> dict:
             "reason": form.get("reason", ""),
             "days_used": float(form.get("days_used", 0)),
             "status": form.get("status", "Approved"),
-            "medical_cert": form.get("medical_cert", ""),
+            "medical_cert": requested_medical_cert,
         }
         medical_cert_file = form.get("medical_cert_file")
         if medical_cert_file and getattr(medical_cert_file, "filename", ""):
@@ -1318,10 +1477,10 @@ async def _read_sick_leave_payload(request: Request) -> dict:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Medical certificate must be a .pdf, .doc, .docx, .jpg, .jpeg, or .png",
                 )
+            await _validate_upload(medical_cert_file, suffix)
             stored_filename = f"{uuid4().hex}{suffix}"
             destination = _medical_cert_path(stored_filename)
-            content = await medical_cert_file.read()
-            destination.write_bytes(content)
+            await _save_upload(medical_cert_file, destination)
             payload["medical_cert"] = stored_filename
         return payload
 
@@ -1331,6 +1490,9 @@ async def _read_sick_leave_payload(request: Request) -> dict:
         end_date = date.fromisoformat(data.get("end_date"))
     except (TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
+    requested_medical_cert = data.get("medical_cert", "")
+    if requested_medical_cert not in ("", MEDICAL_CERT_KEEP):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid medical certificate reference")
     return {
         "employee_id": int(data.get("employee_id", 0)),
         "start_date": start_date,
@@ -1338,7 +1500,7 @@ async def _read_sick_leave_payload(request: Request) -> dict:
         "reason": data.get("reason", ""),
         "days_used": float(data.get("days_used", 0)),
         "status": data.get("status", "Approved"),
-        "medical_cert": data.get("medical_cert", ""),
+        "medical_cert": requested_medical_cert,
     }
 
 
@@ -1375,7 +1537,7 @@ async def create_sick_leave(
         end_date=payload["end_date"],
         reason=payload["reason"],
         days_used=payload["days_used"],
-        medical_cert=payload["medical_cert"] or None,
+        medical_cert=payload["medical_cert"] if payload["medical_cert"] not in ("", MEDICAL_CERT_KEEP) else None,
         status=payload["status"],
     )
     db.add(leave)
@@ -1397,11 +1559,13 @@ async def update_sick_leave(
 
     payload = await _read_sick_leave_payload(request)
     existing_medical_cert = leave.medical_cert
-    new_medical_cert = payload["medical_cert"] or existing_medical_cert
+    new_medical_cert = payload["medical_cert"]
 
     if payload["medical_cert"] == "":
         _delete_medical_cert(existing_medical_cert)
         new_medical_cert = None
+    elif payload["medical_cert"] == MEDICAL_CERT_KEEP:
+        new_medical_cert = existing_medical_cert
     elif payload["medical_cert"] and payload["medical_cert"] != existing_medical_cert:
         _delete_medical_cert(existing_medical_cert)
 
@@ -1452,7 +1616,12 @@ def view_sick_leave_medical_cert(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Medical certificate missing from storage")
 
-    return FileResponse(path, filename=Path(leave.medical_cert).name)
+    content_type = _content_type_for_suffix(Path(leave.medical_cert).suffix)
+    response = FileResponse(path, media_type=content_type, filename=_safe_download_filename(Path(leave.medical_cert).name))
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if content_type in INLINE_PREVIEW_CONTENT_TYPES:
+        response.headers["Content-Disposition"] = f'inline; filename="{_safe_download_filename(Path(leave.medical_cert).name)}"'
+    return response
 
 
 @app.get("/api/employee-leave/report", response_model=EmployeeLeaveReportResponse)
