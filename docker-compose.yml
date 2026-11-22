@@ -23,6 +23,7 @@ services:
     container_name: employee-backend
     volumes:
       - uploads_data:/app/uploads
+      - "./Document Templates:/app/Document Templates"
     environment:
       DATABASE_URL: postgresql+psycopg2://manager:${DB_PASSWORD}@db:5432/employee_app
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
@@ -45,4 +46,3 @@ services:
 volumes:
   postgres_data:
   uploads_data:
-  - "./Document Templates:/app/Document Templates"
