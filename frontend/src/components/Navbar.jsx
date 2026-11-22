@@ -14,7 +14,7 @@ export default function Navbar({ title = "Dashboard" }) {
     <header className="dashboard-topbar">
       <div className="navbar-brand">
         <span className="navbar-title">{title}</span>
-        <span className="navbar-user">Signed in as {user?.username || "admin"}</span>
+        <span className="navbar-user">Signed in as {user?.username || "user"}</span>
       </div>
       <nav className="navbar-actions" aria-label="Dashboard navigation">
         <Link className="nav-link" to="/dashboard">

@@ -32,7 +32,7 @@ export async function fetchCurrentUser(token) {
   return data;
 }
 
-export async function changePasswordRequest(token, currentPassword, newPassword) {
+export async function changePasswordRequest(token, username, currentPassword, newPassword) {
   const response = await fetch("/api/change-password", {
     method: "POST",
     headers: {
@@ -40,8 +40,9 @@ export async function changePasswordRequest(token, currentPassword, newPassword)
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
+      username,
       current_password: currentPassword,
-      new_password: newPassword,
+      new_password: newPassword || null,
     }),
   });
 

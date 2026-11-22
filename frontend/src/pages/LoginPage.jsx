@@ -5,8 +5,8 @@ import { useAuth } from "../auth/AuthContext";
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -31,7 +31,7 @@ export default function LoginPage() {
         <div className="auth-copy">
           <p className="eyebrow">Employee Management</p>
           <h1>Sign in to continue</h1>
-          <p className="subtitle">Use the default admin account to open the dashboard.</p>
+          <p className="subtitle">Use the account configured for this deployment to open the dashboard.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>

@@ -154,6 +154,8 @@ DATABASE_URL=postgresql+psycopg2://manager:${DB_PASSWORD}@db:5432/employee_app
 # Security & Authentication
 JWT_SECRET_KEY=generate_a_secure_random_hex_key_here
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=replace_with_a_strong_initial_password
 
 # File Storage Configuration
 UPLOAD_DIR=/app/uploads
@@ -168,15 +170,17 @@ TEMPLATE_DIR=/app/Document Templates
 
 ---
 
-## 🔐 Default Credentials
+## 🔐 Initial Account
 
-Upon running migrations on container startup, the application initializes a default root account:
+On first startup, the application seeds one account using the credentials in `.env`:
 
-- **Username:** `admin`
-- **Password:** `admin`
+- **Username:** the value of `ADMIN_USERNAME`
+- **Password:** the value of `ADMIN_PASSWORD`
 
 > [!WARNING]
-> Please navigate to `/api/change-password` or use the UI settings to update this password immediately upon first deployment.
+> Set a strong `ADMIN_PASSWORD` before the first deployment. These variables are used only when the database has no user account; changing them later does not reset an existing account.
+
+After signing in, open **Change Password** in the navigation to update the username, password, or both. The current password is required for every account update. Leave the new-password field blank when changing only the username.
 
 ---
 
@@ -205,6 +209,9 @@ The API follows standard RESTful design with structured JSON responses.
 - `POST /api/annual-leave` — Request annual leave.
 - `POST /api/sick-leave` — Log sick leave with multipart medical certificate uploads.
 - `GET /api/employee-leave/report` — Company-wide calculated leave liability report.
+
+### 🔑 Account Management
+- `POST /api/change-password` — Update the authenticated user’s username, password, or both. The current password is required.
 
 ---
 

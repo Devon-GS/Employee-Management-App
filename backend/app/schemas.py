@@ -21,8 +21,9 @@ class UserResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=50)
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=1, max_length=128)
+    new_password: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class EmployeeCreateRequest(BaseModel):

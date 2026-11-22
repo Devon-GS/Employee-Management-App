@@ -47,6 +47,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR_ENV = os.getenv("TEMPLATE_DIR")
 UNIFORM_ISSUE_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 UNIFORM_CARE_LETTER_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").strip()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 ALLOWED_DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".xls", ".xlsx"}
 ALLOWED_CONTRACT_EXTENSIONS = ALLOWED_DOCUMENT_EXTENSIONS
 ALLOWED_MEDICAL_CERT_EXTENSIONS = {".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"}
@@ -101,9 +103,12 @@ app.add_middleware(
 
 
 def seed_admin_user(db: Session) -> None:
-    existing_user = db.scalar(select(User).where(User.username == "admin"))
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        raise RuntimeError("ADMIN_USERNAME and ADMIN_PASSWORD must be configured")
+
+    existing_user = db.scalar(select(User).order_by(User.id))
     if existing_user is None:
-        db.add(User(username="admin", password_hash=hash_password("admin")))
+        db.add(User(username=ADMIN_USERNAME, password_hash=hash_password(ADMIN_PASSWORD)))
         db.commit()
 
 
@@ -218,20 +223,34 @@ def change_password(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
-    if current_user.username != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can change password")
-
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect",
         )
 
-    current_user.password_hash = hash_password(payload.new_password)
-    db.add(current_user)
-    db.commit()
+    new_username = payload.username.strip()
+    if not new_username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username cannot be blank")
 
-    return {"message": "Password updated successfully"}
+    existing_user = db.scalar(
+        select(User).where(User.username == new_username, User.id != current_user.id)
+    )
+    if existing_user is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username is already in use")
+
+    current_user.username = new_username
+    if payload.new_password is not None:
+        current_user.password_hash = hash_password(payload.new_password)
+    db.add(current_user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username is already in use") from None
+    db.refresh(current_user)
+
+    return {"message": "Account updated successfully", "username": current_user.username}
 
 
 @app.get("/api/employees", response_model=list[EmployeeResponse])

@@ -27,6 +27,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://manager:${DB_PASSWORD}@db:5432/employee_app
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       ACCESS_TOKEN_EXPIRE_MINUTES: 1440
     depends_on:
       db:
