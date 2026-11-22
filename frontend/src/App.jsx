@@ -10,6 +10,7 @@ import EmployeeStartupPage from "./pages/EmployeeStartupPage";
 import EmployeesPage from "./pages/EmployeesPage";
 import DashboardPage from "./pages/DashboardPage";
 import LoginPage from "./pages/LoginPage";
+import Footer from "./components/Footer";
 
 function AppRoutes() {
   const { isAuthenticated, loading } = useAuth();
@@ -96,5 +97,10 @@ function AppRoutes() {
 }
 
 export default function App() {
-  return <AppRoutes />;
+  return (
+    <div className="app-shell">
+      <AppRoutes />
+      <Footer />
+    </div>
+  );
 }

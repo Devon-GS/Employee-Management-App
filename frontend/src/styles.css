@@ -24,6 +24,47 @@ body,
   min-height: 100%;
 }
 
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-footer {
+  margin-top: auto;
+  padding: 16px 24px;
+  background: #212529;
+  color: #f8f9fa;
+  text-align: center;
+}
+
+.app-footer-content {
+  width: min(100%, 1140px);
+  margin: 0 auto;
+}
+
+.app-footer-primary,
+.app-footer-secondary {
+  margin: 0;
+}
+
+.app-footer-primary {
+  margin-bottom: 4px;
+}
+
+.app-footer-secondary {
+  font-size: 0.875rem;
+}
+
+.app-footer-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-footer-attribution {
+  opacity: 0.75;
+}
+
 body {
   min-height: 100vh;
   color: var(--text);
