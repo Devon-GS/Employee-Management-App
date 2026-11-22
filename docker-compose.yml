@@ -45,3 +45,4 @@ services:
 volumes:
   postgres_data:
   uploads_data:
+  - "./Document Templates:/app/Document Templates"
