@@ -3,17 +3,20 @@ import os
 import re
 import threading
 import time
+from collections import defaultdict
 from pathlib import Path
 from datetime import date, timedelta
 from uuid import uuid4
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from sqlalchemy.exc import IntegrityError
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from openpyxl import load_workbook
+from pydantic import ValidationError
 
 from .auth import (
     create_access_token,
@@ -67,6 +70,8 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+MAX_FILES_PER_REQUEST = 10
+MAX_TOTAL_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 INLINE_PREVIEW_CONTENT_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 MEDICAL_CERT_KEEP = "__keep__"
 UPLOAD_CONTENT_TYPES = {
@@ -147,7 +152,10 @@ def _check_login_rate_limit(key: str) -> None:
     now = time.monotonic()
     with _login_attempts_lock:
         attempts = [timestamp for timestamp in _login_attempts.get(key, []) if now - timestamp < LOGIN_WINDOW_SECONDS]
-        _login_attempts[key] = attempts
+        if attempts:
+            _login_attempts[key] = attempts
+        else:
+            _login_attempts.pop(key, None)
         if len(attempts) >= LOGIN_MAX_ATTEMPTS:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -249,6 +257,12 @@ def startup_event() -> None:
         connection.execute(
             text(
                 "ALTER TABLE employees ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS "
+                "annual_leave_days INTEGER"
             )
         )
         connection.execute(
@@ -384,6 +398,7 @@ def create_employee(
         name=payload.name.strip(),
         department=payload.department.strip(),
         passport_id=passport_id,
+        annual_leave_days=payload.annual_leave_days,
         startup_data=build_startup_defaults(),
     )
     db.add(employee)
@@ -429,6 +444,8 @@ def update_employee(
     employee.name = payload.name.strip()
     employee.department = payload.department.strip()
     employee.passport_id = passport_id
+    if "annual_leave_days" in payload.model_fields_set:
+        employee.annual_leave_days = payload.annual_leave_days
     db.add(employee)
     try:
         db.commit()
@@ -556,16 +573,20 @@ async def _validate_upload(file: UploadFile, suffix: str) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File content does not match its extension")
 
 
-async def _save_upload(file: UploadFile, destination: Path) -> int:
+async def _save_upload(
+    file: UploadFile,
+    destination: Path,
+    max_size_bytes: int = MAX_UPLOAD_SIZE_BYTES,
+) -> int:
     size_bytes = 0
     try:
         with destination.open("wb") as buffer:
             while True:
-                chunk = await file.read(min(1024 * 1024, MAX_UPLOAD_SIZE_BYTES - size_bytes + 1))
+                chunk = await file.read(min(1024 * 1024, max_size_bytes - size_bytes + 1))
                 if not chunk:
                     break
                 size_bytes += len(chunk)
-                if size_bytes > MAX_UPLOAD_SIZE_BYTES:
+                if size_bytes > max_size_bytes:
                     raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File is too large")
                 buffer.write(chunk)
     except Exception:
@@ -573,6 +594,22 @@ async def _save_upload(file: UploadFile, destination: Path) -> int:
             destination.unlink()
         raise
     return size_bytes
+
+
+def _validate_file_batch(files: list[UploadFile]) -> None:
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one file is required")
+    if len(files) > MAX_FILES_PER_REQUEST:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"You can upload at most {MAX_FILES_PER_REQUEST} files per request",
+        )
+    declared_total = sum(file.size or 0 for file in files)
+    if declared_total > MAX_TOTAL_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="The total upload size is too large",
+        )
 
 
 def _normalize_document_type(document_type: str) -> str:
@@ -765,98 +802,128 @@ def _permit_expire_date(employee: Employee) -> date | None:
     return _parse_iso_date(permit_status.get("date"))
 
 
-def calculate_annual_leave_balance(employee_id: int) -> tuple[float, float]:
-    with SessionLocal() as db:
-        employee = db.get(Employee, employee_id)
-        if employee is None:
-            return 0, 0
+def _months_employed(start_date: date | None) -> int:
+    if start_date is None:
+        return 0
+    today = date.today()
+    return max(0, (today.year - start_date.year) * 12 + (today.month - start_date.month))
 
-        permanent_start_date = _permanent_contract_start_date(employee)
-        if permanent_start_date is None:
-            return 0, 0
 
-        today = date.today()
-        months_employed = max(
-            0,
-            (today.year - permanent_start_date.year) * 12 + (today.month - permanent_start_date.month),
-        )
+def calculate_annual_leave_balance(employee_id: int, db: Session) -> tuple[float, float]:
+    employee = db.get(Employee, employee_id)
+    if employee is None:
+        return 0, 0
 
-        if employee.passport_id == "8601310127086":
-            entitlement = months_employed * (20 / 12)
-        else:
-            entitlement = months_employed * 1.25
+    permanent_start_date = _permanent_contract_start_date(employee)
+    if permanent_start_date is None:
+        return 0, 0
 
-        used_days = (
-            db.scalar(
-                select(func.coalesce(func.sum(AnnualLeave.days_used), 0)).where(
-                    AnnualLeave.employee_id == employee_id,
-                    AnnualLeave.status == "Approved",
-                )
+    months_employed = _months_employed(permanent_start_date)
+    monthly_entitlement = (
+        float(employee.annual_leave_days) / 12
+        if employee.annual_leave_days is not None
+        else 1.25
+    )
+    entitlement = months_employed * monthly_entitlement
+    used_days = (
+        db.scalar(
+            select(func.coalesce(func.sum(AnnualLeave.days_used), 0)).where(
+                AnnualLeave.employee_id == employee_id,
+                AnnualLeave.status == "Approved",
             )
-            or 0
         )
-    balance = entitlement - float(used_days)
-    return entitlement, balance
+        or 0
+    )
+    return entitlement, entitlement - float(used_days)
 
 
-def calculate_sick_leave_balance(employee_id: int) -> tuple[float, float]:
-    with SessionLocal() as db:
-        employee = db.get(Employee, employee_id)
-        if employee is None:
-            return 0, 0
+def calculate_sick_leave_balance(employee_id: int, db: Session) -> tuple[float, float]:
+    employee = db.get(Employee, employee_id)
+    if employee is None:
+        return 0, 0
 
-        permanent_start_date = _permanent_contract_start_date(employee)
-        if permanent_start_date is None:
-            return 0, 0
+    permanent_start_date = _permanent_contract_start_date(employee)
+    if permanent_start_date is None:
+        return 0, 0
 
-        today = date.today()
-        days_employed = (today - permanent_start_date).days
+    today = date.today()
+    days_employed = (today - permanent_start_date).days
+    approved = select(SickLeave.days_used).where(
+        SickLeave.employee_id == employee_id,
+        SickLeave.status == "Approved",
+    )
 
+    if days_employed < 180:
+        entitlement = days_employed // 26
+        used_days = db.scalars(approved).all()
+        return entitlement, max(0, entitlement - sum(float(value) for value in used_days))
+
+    days_after_six_months = days_employed - 180
+    complete_cycles = days_after_six_months // 1095
+    cycle_start_date = permanent_start_date + timedelta(days=180 + (complete_cycles * 1095))
+    cycle_used_days = db.scalars(
+        approved.where(SickLeave.start_date >= cycle_start_date)
+    ).all()
+    entitlement = 30
+    balance = entitlement - sum(float(value) for value in cycle_used_days)
+    if complete_cycles == 0:
+        probation_used_days = db.scalars(
+            approved.where(SickLeave.start_date < (permanent_start_date + timedelta(days=180)))
+        ).all()
+        balance -= sum(float(value) for value in probation_used_days)
+    return entitlement, max(0, balance)
+
+
+def _bulk_annual_leave_balances(db: Session, employees: list[Employee]) -> dict[int, tuple[float, float]]:
+    employee_ids = [employee.id for employee in employees]
+    used_by_employee = {
+        employee_id: float(days or 0)
+        for employee_id, days in db.execute(
+            select(AnnualLeave.employee_id, func.coalesce(func.sum(AnnualLeave.days_used), 0))
+            .where(AnnualLeave.employee_id.in_(employee_ids), AnnualLeave.status == "Approved")
+            .group_by(AnnualLeave.employee_id)
+        ).all()
+    }
+    result = {}
+    for employee in employees:
+        months = _months_employed(_permanent_contract_start_date(employee))
+        monthly = float(employee.annual_leave_days) / 12 if employee.annual_leave_days is not None else 1.25
+        entitlement = months * monthly
+        result[employee.id] = (entitlement, entitlement - used_by_employee.get(employee.id, 0))
+    return result
+
+
+def _bulk_sick_leave_balances(db: Session, employees: list[Employee]) -> dict[int, tuple[float, float]]:
+    approved = db.scalars(
+        select(SickLeave).where(
+            SickLeave.employee_id.in_([employee.id for employee in employees]),
+            SickLeave.status == "Approved",
+        )
+    ).all()
+    leave_by_employee: dict[int, list[SickLeave]] = defaultdict(list)
+    for leave in approved:
+        leave_by_employee[leave.employee_id].append(leave)
+
+    result = {}
+    for employee in employees:
+        start_date = _permanent_contract_start_date(employee)
+        days_employed = (date.today() - start_date).days if start_date else 0
+        leaves = leave_by_employee[employee.id]
+        if start_date is None:
+            result[employee.id] = (0, 0)
+            continue
         if days_employed < 180:
             entitlement = days_employed // 26
-            used_days = (
-                db.scalar(
-                    select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
-                        SickLeave.employee_id == employee_id,
-                        SickLeave.status == "Approved",
-                    )
-                )
-                or 0
-            )
-            return entitlement, max(0, entitlement - float(used_days))
-
-        days_after_six_months = days_employed - 180
-        complete_cycles = days_after_six_months // 1095
-        cycle_start_date = permanent_start_date + timedelta(days=180 + (complete_cycles * 1095))
-
-        used_days = (
-            db.scalar(
-                select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
-                    SickLeave.employee_id == employee_id,
-                    SickLeave.status == "Approved",
-                    SickLeave.start_date >= cycle_start_date,
-                )
-            )
-            or 0
-        )
-
-        entitlement = 30
-        if complete_cycles == 0:
-            probation_used_days = (
-                db.scalar(
-                    select(func.coalesce(func.sum(SickLeave.days_used), 0)).where(
-                        SickLeave.employee_id == employee_id,
-                        SickLeave.status == "Approved",
-                        SickLeave.start_date < (permanent_start_date + timedelta(days=180)),
-                    )
-                )
-                or 0
-            )
-            balance = entitlement - float(probation_used_days) - float(used_days)
-        else:
-            balance = entitlement - float(used_days)
-
-        return entitlement, max(0, balance)
+            used = sum(float(leave.days_used) for leave in leaves)
+            result[employee.id] = (entitlement, max(0, entitlement - used))
+            continue
+        cycles = (days_employed - 180) // 1095
+        cycle_start = start_date + timedelta(days=180 + cycles * 1095)
+        used = sum(float(leave.days_used) for leave in leaves if leave.start_date >= cycle_start)
+        if cycles == 0:
+            used += sum(float(leave.days_used) for leave in leaves if leave.start_date < start_date + timedelta(days=180))
+        result[employee.id] = (30, max(0, 30 - used))
+    return result
 
 
 def _annual_leave_response(leave: AnnualLeave, employee_name: str) -> AnnualLeaveResponse:
@@ -893,14 +960,15 @@ def get_employee_profile(
     db: Session = Depends(get_db),
 ) -> EmployeeProfileResponse:
     employee = _get_employee_or_404(db, employee_id)
-    annual_entitlement, annual_balance = calculate_annual_leave_balance(employee_id)
-    sick_entitlement, sick_balance = calculate_sick_leave_balance(employee_id)
+    annual_entitlement, annual_balance = calculate_annual_leave_balance(employee_id, db)
+    sick_entitlement, sick_balance = calculate_sick_leave_balance(employee_id, db)
 
     return EmployeeProfileResponse(
         id=employee.id,
         name=employee.name,
         department=employee.department,
         passport_id=employee.passport_id,
+        annual_leave_days=employee.annual_leave_days,
         archived=employee.archived,
         permanent_contract_start_date=_permanent_contract_start_date(employee),
         permit_expire_date=_permit_expire_date(employee),
@@ -936,6 +1004,7 @@ async def upload_contract_file(
     db: Session = Depends(get_db),
 ) -> list[ContractFileResponse]:
     _get_employee_or_404(db, employee_id)
+    _validate_file_batch(files)
 
     for file in files:
         original_name = file.filename or ""
@@ -948,31 +1017,37 @@ async def upload_contract_file(
         await _validate_upload(file, suffix)
 
     created_files: list[ContractFile] = []
-
-    for file in files:
-        original_name = file.filename or ""
-        suffix = Path(original_name).suffix.lower()
-
-        stored_filename = f"{uuid4().hex}{suffix}"
-        destination = _contract_file_path(stored_filename)
-
-        size_bytes = await _save_upload(file, destination)
-
-        created_files.append(
-            ContractFile(
-                employee_id=employee_id,
-                original_filename=original_name,
-                stored_filename=stored_filename,
-                content_type=_content_type_for_suffix(suffix),
-                size_bytes=size_bytes,
+    written_paths: list[Path] = []
+    total_size = 0
+    try:
+        for file in files:
+            original_name = file.filename or ""
+            suffix = Path(original_name).suffix.lower()
+            stored_filename = f"{uuid4().hex}{suffix}"
+            destination = _contract_file_path(stored_filename)
+            size_bytes = await _save_upload(file, destination, MAX_TOTAL_UPLOAD_SIZE_BYTES - total_size)
+            total_size += size_bytes
+            written_paths.append(destination)
+            created_files.append(
+                ContractFile(
+                    employee_id=employee_id,
+                    original_filename=original_name,
+                    stored_filename=stored_filename,
+                    content_type=_content_type_for_suffix(suffix),
+                    size_bytes=size_bytes,
+                )
             )
-        )
-
-    db.add_all(created_files)
-    db.commit()
-    for contract_file in created_files:
-        db.refresh(contract_file)
-    return created_files
+        db.add_all(created_files)
+        db.commit()
+        for contract_file in created_files:
+            db.refresh(contract_file)
+        return created_files
+    except Exception:
+        db.rollback()
+        for path in written_paths:
+            if path.exists():
+                path.unlink()
+        raise
 
 
 @app.get("/api/contract-files/{file_id}/download")
@@ -1080,6 +1155,7 @@ async def upload_employee_documents(
     db: Session = Depends(get_db),
 ) -> list[EmployeeDocumentResponse]:
     _get_employee_or_404(db, employee_id)
+    _validate_file_batch(files)
     document_type = _normalize_document_type(document_type)
 
     for file in files:
@@ -1093,32 +1169,38 @@ async def upload_employee_documents(
         await _validate_upload(file, suffix)
 
     created_documents: list[EmployeeDocument] = []
-
-    for file in files:
-        original_name = file.filename or ""
-        suffix = Path(original_name).suffix.lower()
-
-        stored_filename = f"{uuid4().hex}{suffix}"
-        destination = _document_path(stored_filename)
-
-        size_bytes = await _save_upload(file, destination)
-
-        created_documents.append(
-            EmployeeDocument(
-                employee_id=employee_id,
-                document_type=document_type,
-                original_filename=original_name,
-                stored_filename=stored_filename,
-                content_type=_content_type_for_suffix(suffix),
-                size_bytes=size_bytes,
+    written_paths: list[Path] = []
+    total_size = 0
+    try:
+        for file in files:
+            original_name = file.filename or ""
+            suffix = Path(original_name).suffix.lower()
+            stored_filename = f"{uuid4().hex}{suffix}"
+            destination = _document_path(stored_filename)
+            size_bytes = await _save_upload(file, destination, MAX_TOTAL_UPLOAD_SIZE_BYTES - total_size)
+            total_size += size_bytes
+            written_paths.append(destination)
+            created_documents.append(
+                EmployeeDocument(
+                    employee_id=employee_id,
+                    document_type=document_type,
+                    original_filename=original_name,
+                    stored_filename=stored_filename,
+                    content_type=_content_type_for_suffix(suffix),
+                    size_bytes=size_bytes,
+                )
             )
-        )
-
-    db.add_all(created_documents)
-    db.commit()
-    for document in created_documents:
-        db.refresh(document)
-    return created_documents
+        db.add_all(created_documents)
+        db.commit()
+        for document in created_documents:
+            db.refresh(document)
+        return created_documents
+    except Exception:
+        db.rollback()
+        for path in written_paths:
+            if path.exists():
+                path.unlink()
+        raise
 
 
 @app.post(
@@ -1191,38 +1273,43 @@ def save_uniform_issue_document(
 
     safe_employee_name = _sanitize_filename_part(employee.name)
     original_filename = f"ISSUE-Uniforms - {safe_employee_name}.xlsx"
-    stored_filename = f"uniform_issue_{employee.id}.xlsx"
+    stored_filename = f"uniform_issue_{employee.id}_{uuid4().hex}.xlsx"
     temp_output_path = UPLOAD_DIR / f".uniform_issue_{employee.id}_{uuid4().hex}.xlsx"
     output_path = UPLOAD_DIR / stored_filename
-
-    workbook.save(temp_output_path)
-
     existing_documents = _hidden_uniform_issue_documents_query(db, employee_id)
-    if existing_documents:
-        existing_paths = [_uniform_issue_document_path(document) for document in existing_documents]
+    existing_paths = [_uniform_issue_document_path(document) for document in existing_documents]
+    document_committed = False
+    try:
+        workbook.save(temp_output_path)
+        temp_output_path.replace(output_path)
+        document = EmployeeDocument(
+            employee_id=employee_id,
+            document_type="uniform_issue",
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            content_type=UNIFORM_ISSUE_MIME_TYPE,
+            size_bytes=output_path.stat().st_size,
+        )
+        db.add(document)
+        db.commit()
+        document_committed = True
+        db.refresh(document)
+
         for existing_document in existing_documents:
             db.delete(existing_document)
-        db.commit()
+        if existing_documents:
+            db.commit()
         for existing_path in existing_paths:
             if existing_path.exists():
                 existing_path.unlink()
-
-    if output_path.exists():
-        output_path.unlink()
-    temp_output_path.replace(output_path)
-
-    document = EmployeeDocument(
-        employee_id=employee_id,
-        document_type="uniform_issue",
-        original_filename=original_filename,
-        stored_filename=stored_filename,
-        content_type=UNIFORM_ISSUE_MIME_TYPE,
-        size_bytes=output_path.stat().st_size,
-    )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-    return document
+        return document
+    except Exception:
+        db.rollback()
+        if temp_output_path.exists():
+            temp_output_path.unlink()
+        if not document_committed and output_path.exists():
+            output_path.unlink()
+        raise
 
 
 @app.get(
@@ -1306,7 +1393,13 @@ def download_employee_document(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing from storage")
 
-    return FileResponse(path, media_type=document.content_type, filename=document.original_filename)
+    response = FileResponse(
+        path,
+        media_type=document.content_type,
+        filename=_safe_download_filename(document.original_filename),
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/api/documents/{document_id}/view")
@@ -1448,60 +1541,52 @@ def delete_annual_leave(
     return {"message": "Annual leave deleted"}
 
 
-async def _read_sick_leave_payload(request: Request) -> dict:
-    content_type = request.headers.get("content-type", "")
+async def _read_sick_leave_payload(
+    request: Request,
+    schema_type: type[SickLeaveCreateRequest | SickLeaveUpdateRequest],
+) -> tuple[SickLeaveCreateRequest | SickLeaveUpdateRequest, UploadFile | None]:
+    content_type = request.headers.get("content-type", "").lower()
+    medical_cert_file: UploadFile | None = None
     if "multipart/form-data" in content_type:
         form = await request.form()
+        data = {key: value for key, value in form.items() if key != "medical_cert_file"}
+        candidate = form.get("medical_cert_file")
+        if isinstance(candidate, StarletteUploadFile) and candidate.filename:
+            medical_cert_file = candidate
+    else:
         try:
-            start_date = date.fromisoformat(form.get("start_date"))
-            end_date = date.fromisoformat(form.get("end_date"))
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
-        requested_medical_cert = form.get("medical_cert", "")
-        if requested_medical_cert not in ("", MEDICAL_CERT_KEEP):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid medical certificate reference")
-        payload = {
-            "employee_id": int(form.get("employee_id", 0)),
-            "start_date": start_date,
-            "end_date": end_date,
-            "reason": form.get("reason", ""),
-            "days_used": float(form.get("days_used", 0)),
-            "status": form.get("status", "Approved"),
-            "medical_cert": requested_medical_cert,
-        }
-        medical_cert_file = form.get("medical_cert_file")
-        if medical_cert_file and getattr(medical_cert_file, "filename", ""):
-            suffix = Path(medical_cert_file.filename).suffix.lower()
-            if suffix not in ALLOWED_MEDICAL_CERT_EXTENSIONS:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Medical certificate must be a .pdf, .doc, .docx, .jpg, .jpeg, or .png",
-                )
-            await _validate_upload(medical_cert_file, suffix)
-            stored_filename = f"{uuid4().hex}{suffix}"
-            destination = _medical_cert_path(stored_filename)
-            await _save_upload(medical_cert_file, destination)
-            payload["medical_cert"] = stored_filename
-        return payload
+            data = await request.json()
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A valid JSON body is required") from None
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="JSON body must be an object")
 
-    data = await request.json()
     try:
-        start_date = date.fromisoformat(data.get("start_date"))
-        end_date = date.fromisoformat(data.get("end_date"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Valid start and end dates are required")
-    requested_medical_cert = data.get("medical_cert", "")
-    if requested_medical_cert not in ("", MEDICAL_CERT_KEEP):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid medical certificate reference")
-    return {
-        "employee_id": int(data.get("employee_id", 0)),
-        "start_date": start_date,
-        "end_date": end_date,
-        "reason": data.get("reason", ""),
-        "days_used": float(data.get("days_used", 0)),
-        "status": data.get("status", "Approved"),
-        "medical_cert": requested_medical_cert,
-    }
+        payload = schema_type.model_validate(data)
+    except ValidationError as exc:
+        detail = [
+            {"loc": error.get("loc", ()), "msg": error.get("msg", "Invalid value"), "type": error.get("type", "value_error")}
+            for error in exc.errors()
+        ]
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail) from None
+    return payload, medical_cert_file
+
+
+async def _save_medical_certificate(file: UploadFile | None) -> tuple[str | None, Path | None]:
+    if file is None:
+        return None, None
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_MEDICAL_CERT_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Medical certificate must be a .pdf, .doc, .docx, .jpg, .jpeg, or .png",
+        )
+    _validate_file_batch([file])
+    await _validate_upload(file, suffix)
+    stored_filename = f"{uuid4().hex}{suffix}"
+    destination = _medical_cert_path(stored_filename)
+    await _save_upload(file, destination)
+    return stored_filename, destination
 
 
 @app.get("/api/sick-leave", response_model=list[SickLeaveResponse])
@@ -1529,21 +1614,33 @@ async def create_sick_leave(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SickLeaveResponse:
-    payload = await _read_sick_leave_payload(request)
-    employee = _get_employee_or_404(db, payload["employee_id"])
-    leave = SickLeave(
-        employee_id=payload["employee_id"],
-        start_date=payload["start_date"],
-        end_date=payload["end_date"],
-        reason=payload["reason"],
-        days_used=payload["days_used"],
-        medical_cert=payload["medical_cert"] if payload["medical_cert"] not in ("", MEDICAL_CERT_KEEP) else None,
-        status=payload["status"],
-    )
-    db.add(leave)
-    db.commit()
-    db.refresh(leave)
-    return _sick_leave_response(leave, employee.name)
+    payload, medical_cert_file = await _read_sick_leave_payload(request, SickLeaveCreateRequest)
+    employee = _get_employee_or_404(db, payload.employee_id)
+    new_filename = None
+    new_path = None
+    committed = False
+    try:
+        new_filename, new_path = await _save_medical_certificate(medical_cert_file)
+        leave = SickLeave(
+            employee_id=payload.employee_id,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            reason=payload.reason,
+            days_used=payload.days_used,
+            medical_cert=new_filename,
+            status=payload.status,
+        )
+        db.add(leave)
+        db.commit()
+        committed = True
+        db.refresh(leave)
+        return _sick_leave_response(leave, employee.name)
+    except Exception:
+        if not committed:
+            db.rollback()
+        if not committed and new_path and new_path.exists():
+            new_path.unlink()
+        raise
 
 
 @app.put("/api/sick-leave/{leave_id}", response_model=SickLeaveResponse)
@@ -1557,30 +1654,40 @@ async def update_sick_leave(
     if leave is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sick leave not found")
 
-    payload = await _read_sick_leave_payload(request)
+    payload, medical_cert_file = await _read_sick_leave_payload(request, SickLeaveUpdateRequest)
     existing_medical_cert = leave.medical_cert
-    new_medical_cert = payload["medical_cert"]
+    new_path = None
+    committed = False
+    try:
+        uploaded_filename, new_path = await _save_medical_certificate(medical_cert_file)
+        if uploaded_filename:
+            new_medical_cert = uploaded_filename
+        elif payload.medical_cert == "":
+            new_medical_cert = None
+        else:
+            new_medical_cert = existing_medical_cert
 
-    if payload["medical_cert"] == "":
-        _delete_medical_cert(existing_medical_cert)
-        new_medical_cert = None
-    elif payload["medical_cert"] == MEDICAL_CERT_KEEP:
-        new_medical_cert = existing_medical_cert
-    elif payload["medical_cert"] and payload["medical_cert"] != existing_medical_cert:
-        _delete_medical_cert(existing_medical_cert)
+        leave.start_date = payload.start_date
+        leave.end_date = payload.end_date
+        leave.reason = payload.reason
+        leave.days_used = payload.days_used
+        leave.medical_cert = new_medical_cert
+        leave.status = payload.status
+        db.add(leave)
+        db.commit()
+        committed = True
+        db.refresh(leave)
 
-    leave.start_date = payload["start_date"]
-    leave.end_date = payload["end_date"]
-    leave.reason = payload["reason"]
-    leave.days_used = payload["days_used"]
-    leave.medical_cert = new_medical_cert
-    leave.status = payload["status"]
-    db.add(leave)
-    db.commit()
-    db.refresh(leave)
-
-    employee = _get_employee_or_404(db, leave.employee_id)
-    return _sick_leave_response(leave, employee.name)
+        if existing_medical_cert and existing_medical_cert != new_medical_cert:
+            _delete_medical_cert(existing_medical_cert)
+        employee = _get_employee_or_404(db, leave.employee_id)
+        return _sick_leave_response(leave, employee.name)
+    except Exception:
+        if not committed:
+            db.rollback()
+        if not committed and new_path and new_path.exists():
+            new_path.unlink()
+        raise
 
 
 @app.delete("/api/sick-leave/{leave_id}")
@@ -1593,9 +1700,10 @@ def delete_sick_leave(
     if leave is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sick leave not found")
 
-    _delete_medical_cert(leave.medical_cert)
+    existing_medical_cert = leave.medical_cert
     db.delete(leave)
     db.commit()
+    _delete_medical_cert(existing_medical_cert)
     return {"message": "Sick leave deleted"}
 
 
@@ -1647,10 +1755,12 @@ def employee_leave_report(
         .order_by(SickLeave.start_date.desc(), SickLeave.id.desc())
     ).all()
 
+    annual_balances = _bulk_annual_leave_balances(db, employees)
+    sick_balances = _bulk_sick_leave_balances(db, employees)
     summary = []
     for employee in employees:
-        annual_entitlement, annual_balance = calculate_annual_leave_balance(employee.id)
-        sick_entitlement, sick_balance = calculate_sick_leave_balance(employee.id)
+        annual_entitlement, annual_balance = annual_balances[employee.id]
+        sick_entitlement, sick_balance = sick_balances[employee.id]
         summary.append(
             EmployeeLeaveSummaryResponse(
                 id=employee.id,

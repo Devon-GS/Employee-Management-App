@@ -1,6 +1,55 @@
 from datetime import date
+from enum import StrEnum
+import math
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class LeaveStatus(StrEnum):
+    APPROVED = "Approved"
+    PENDING = "Pending"
+    REJECTED = "Rejected"
+
+
+STARTUP_CHECKLIST_ALLOWED_KEYS = {
+    "Contract",
+    "Contract Status",
+    "Permit Status",
+    "Passport / ID Copy",
+    "Permit Copy",
+    "Name for file & Name Badge",
+    "Uniform & Uniform Care Letter",
+    "Start",
+    "UIF",
+    "MIBCO reg",
+    "Open Weekly Deduction Sheet",
+    "Disciplinary Spreadsheet & Permit Spreadsheet",
+    "Phone No. onto Contacts List",
+    "Staff Instructions / Training Pack / Job Description",
+    "Job Description",
+    "Uniform & Uniform Letter & Uniform Sizes Onto Chart & Employ No. & Badge No.",
+}
+
+
+def _validate_startup_value(value: object, depth: int = 0) -> None:
+    if depth > 4:
+        raise ValueError("Startup checklist nesting is too deep")
+    if isinstance(value, str):
+        if len(value) > 2000:
+            raise ValueError("Startup checklist text is too long")
+    elif isinstance(value, dict):
+        if len(value) > 20:
+            raise ValueError("Startup checklist object contains too many keys")
+        for key, item in value.items():
+            if not isinstance(key, str) or len(key) > 120:
+                raise ValueError("Startup checklist keys are invalid")
+            _validate_startup_value(item, depth + 1)
+    elif isinstance(value, list):
+        if len(value) > 20:
+            raise ValueError("Startup checklist list contains too many items")
+        for item in value:
+            _validate_startup_value(item, depth + 1)
 
 
 class LoginRequest(BaseModel):
@@ -30,6 +79,7 @@ class EmployeeCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
+    annual_leave_days: int | None = Field(default=None, gt=0, le=366)
 
 
 class EmployeeResponse(BaseModel):
@@ -39,6 +89,7 @@ class EmployeeResponse(BaseModel):
     name: str
     department: str | None = None
     passport_id: str
+    annual_leave_days: int | None = None
     startup_data: dict = Field(default_factory=dict)
     archived: bool = False
 
@@ -50,6 +101,7 @@ class EmployeeProfileResponse(BaseModel):
     name: str
     department: str | None = None
     passport_id: str
+    annual_leave_days: int | None = None
     archived: bool = False
     permanent_contract_start_date: date | None = None
     permit_expire_date: date | None = None
@@ -63,24 +115,33 @@ class EmployeeUpdateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     department: str = Field(min_length=1, max_length=50)
     passport_id: str = Field(min_length=1, max_length=120)
+    annual_leave_days: int | None = Field(default=None, gt=0, le=366)
 
 
 class StartupChecklistRequest(BaseModel):
-    checklist: dict
+    checklist: dict[str, object] = Field(max_length=20)
+
+    @model_validator(mode="after")
+    def validate_checklist(self):
+        unknown_keys = set(self.checklist) - STARTUP_CHECKLIST_ALLOWED_KEYS
+        if unknown_keys:
+            raise ValueError("Startup checklist contains unsupported keys")
+        _validate_startup_value(self.checklist)
+        return self
 
 
 class UniformIssueRowRequest(BaseModel):
-    description: str = ""
-    size: str = ""
-    quantity: str = ""
-    condition: str = ""
-    details: str = ""
-    returns: str = ""
-    cost: str = ""
+    description: str = Field(default="", max_length=200)
+    size: str = Field(default="", max_length=200)
+    quantity: str = Field(default="", max_length=200)
+    condition: str = Field(default="", max_length=200)
+    details: str = Field(default="", max_length=200)
+    returns: str = Field(default="", max_length=200)
+    cost: str = Field(default="", max_length=200)
 
 
 class UniformIssueSaveRequest(BaseModel):
-    rows: list[UniformIssueRowRequest]
+    rows: list[UniformIssueRowRequest] = Field(max_length=10)
 
 
 class UniformIssueWorkbookResponse(BaseModel):
@@ -109,21 +170,41 @@ class EmployeeDocumentResponse(BaseModel):
     size_bytes: int
 
 
-class AnnualLeaveCreateRequest(BaseModel):
+class LeaveRequestBase(BaseModel):
     employee_id: int
     start_date: date
     end_date: date
     reason: str = ""
-    days_used: float = Field(gt=0)
-    status: str = "Approved"
+    days_used: float = Field(gt=0, allow_inf_nan=False)
+    status: LeaveStatus = LeaveStatus.APPROVED
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if not math.isfinite(self.days_used):
+            raise ValueError("days_used must be finite")
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
+
+
+class AnnualLeaveCreateRequest(LeaveRequestBase):
+    pass
 
 
 class AnnualLeaveUpdateRequest(BaseModel):
     start_date: date
     end_date: date
     reason: str = ""
-    days_used: float = Field(gt=0)
-    status: str = "Approved"
+    days_used: float = Field(gt=0, allow_inf_nan=False)
+    status: LeaveStatus = LeaveStatus.APPROVED
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if not math.isfinite(self.days_used):
+            raise ValueError("days_used must be finite")
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
 
 
 class AnnualLeaveResponse(BaseModel):
@@ -139,23 +220,25 @@ class AnnualLeaveResponse(BaseModel):
     status: str
 
 
-class SickLeaveCreateRequest(BaseModel):
-    employee_id: int
-    start_date: date
-    end_date: date
-    reason: str = ""
-    days_used: float = Field(gt=0)
-    status: str = "Approved"
-    medical_cert: str = ""
+class SickLeaveCreateRequest(LeaveRequestBase):
+    medical_cert: Literal["", "__keep__"] = ""
 
 
 class SickLeaveUpdateRequest(BaseModel):
     start_date: date
     end_date: date
     reason: str = ""
-    days_used: float = Field(gt=0)
-    status: str = "Approved"
-    medical_cert: str = ""
+    days_used: float = Field(gt=0, allow_inf_nan=False)
+    status: LeaveStatus = LeaveStatus.APPROVED
+    medical_cert: Literal["", "__keep__"] = ""
+
+    @model_validator(mode="after")
+    def validate_date_range(self):
+        if not math.isfinite(self.days_used):
+            raise ValueError("days_used must be finite")
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
 
 
 class SickLeaveResponse(BaseModel):

@@ -24,6 +24,7 @@ class Employee(Base):
     name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     department: Mapped[str | None] = mapped_column(String(50), nullable=True)
     passport_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    annual_leave_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     startup_data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

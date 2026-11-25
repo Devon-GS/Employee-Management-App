@@ -443,13 +443,14 @@ export async function saveUniformIssue(token, employeeId, rows) {
   return data;
 }
 
-export async function saveEmployeeStartup(token, employeeId, checklist) {
+export async function saveEmployeeStartup(token, employeeId, checklist, signal) {
   const response = await fetch(`/api/employees/${employeeId}/startup`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
+    signal,
     body: JSON.stringify({ checklist }),
   });
 

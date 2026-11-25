@@ -141,6 +141,8 @@ export default function EmployeeStartupPage() {
   const [uniformActionsModalOpen, setUniformActionsModalOpen] = useState(false);
   const [uniformEditorChoiceOpen, setUniformEditorChoiceOpen] = useState(false);
   const [contractStatusEntries, setContractStatusEntries] = useState([]);
+  const autosaveControllerRef = useRef(null);
+  const autosaveSequenceRef = useRef(0);
 
   function buildContractStatusRow(entries, fallbackRow = {}) {
     const nextEntries = Array.isArray(entries) ? entries : [];
@@ -285,27 +287,45 @@ export default function EmployeeStartupPage() {
   }, [token, employeeId]);
 
   useEffect(() => {
+    autosaveSequenceRef.current += 1;
+    const sequence = autosaveSequenceRef.current;
+    autosaveControllerRef.current?.abort();
+
     if (!autoSaveReady || loading || !isDirty) {
+      setSaving(false);
       return undefined;
     }
 
+    const controller = new AbortController();
+    autosaveControllerRef.current = controller;
     setSaving(true);
     setMessage("");
 
     const timer = window.setTimeout(async () => {
       try {
-        await saveEmployeeStartup(token, employeeId, checklist);
+        await saveEmployeeStartup(token, employeeId, checklist, controller.signal);
+        if (sequence !== autosaveSequenceRef.current) {
+          return;
+        }
         setError("");
         setMessage("Auto-saved.");
         setIsDirty(false);
       } catch (err) {
+        if (err.name === "AbortError" || sequence !== autosaveSequenceRef.current) {
+          return;
+        }
         setError(err.message || "Unable to save startup details");
       } finally {
-        setSaving(false);
+        if (sequence === autosaveSequenceRef.current) {
+          setSaving(false);
+        }
       }
     }, 500);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [autoSaveReady, checklist, employeeId, isDirty, loading, token]);
 
   function updateRow(label, changes) {
